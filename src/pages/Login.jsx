@@ -41,41 +41,43 @@ export function Login() {
   if (loading) return <SessionLoader message="Verificando sesión..." />;
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-slate-100">
-      <div className="pointer-events-none absolute -left-28 -top-24 h-72 w-72 rounded-full bg-primary-200/60 blur-3xl" />
-      <div className="pointer-events-none absolute -right-20 top-1/3 h-72 w-72 rounded-full bg-emerald-200/60 blur-3xl" />
+    <div className="relative min-h-screen overflow-hidden bg-white">
+      <div className="pointer-events-none absolute -left-20 -top-20 h-72 w-72 rounded-full bg-primary-100 blur-3xl" />
+      <div className="pointer-events-none absolute -right-20 bottom-0 h-72 w-72 rounded-full bg-emerald-100 blur-3xl" />
 
-      <div className="relative mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 items-center gap-6 p-4 md:p-8 lg:grid-cols-[1.05fr_0.95fr]">
-        <section className="hidden h-[640px] rounded-3xl border border-slate-200 bg-white p-8 shadow-sm lg:flex lg:flex-col lg:justify-between">
+      <div className="relative mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 items-center gap-6 p-4 md:p-8 lg:grid-cols-[1.1fr_0.9fr]">
+        <section className="hidden h-[640px] rounded-3xl border border-slate-200 bg-white p-9 shadow-sm lg:flex lg:flex-col lg:justify-between">
           <div className="flex items-center gap-4">
-            <img
-              src="/assets/images/logo.png"
-              alt={`${APP_NAME} logo`}
-              className="h-16 w-16 rounded-2xl object-contain"
-            />
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100">
+              <img src="/assets/images/logo.png" alt={`${APP_NAME} logo`} className="h-10 w-10 object-contain" />
+            </div>
             <div>
               <p className="text-3xl font-bold tracking-tight text-slate-800">{APP_NAME}</p>
-              <p className="text-sm text-slate-500">Panel administrativo para bar y restaurante</p>
+              <p className="text-sm text-slate-500">Control operativo de bar y restaurante</p>
             </div>
           </div>
 
           <div className="space-y-4">
             <p className="max-w-md text-4xl font-semibold leading-tight text-slate-800">
-              Administra mesas, cocina y caja en una sola pantalla.
+              Sistema limpio para operar rápido y sin confusión.
             </p>
             <p className="max-w-md text-base text-slate-500">
-              Diseno limpio para operar rapido, con foco en ordenes y ventas.
+              Gestiona mesas, cocina, pedidos y caja desde una sola interfaz clara.
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs text-slate-500">Ordenes hoy</p>
-              <p className="mt-1 text-2xl font-bold text-slate-800">128</p>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Mesas</p>
+              <p className="mt-1 text-sm font-semibold text-slate-800">Operación ágil</p>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs text-slate-500">Ingreso diario</p>
-              <p className="mt-1 text-2xl font-bold text-slate-800">C$ 2,480</p>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Cocina</p>
+              <p className="mt-1 text-sm font-semibold text-slate-800">Seguimiento KDS</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Caja</p>
+              <p className="mt-1 text-sm font-semibold text-slate-800">Cobro C$ / USD</p>
             </div>
           </div>
         </section>
@@ -88,14 +90,9 @@ export function Login() {
               className="h-24 w-auto object-contain"
             />
           </div>
-          <div className="mb-7 flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-100 text-primary-600">
-              <Lock className="h-5 w-5" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-800">Iniciar sesion</h1>
-              <p className="text-sm text-slate-500">Ingresa para continuar al panel</p>
-            </div>
+          <div className="mb-7 text-center">
+            <h1 className="text-2xl font-bold text-slate-800">Iniciar sesión</h1>
+            <p className="mt-1 text-sm text-slate-500">Accede al panel administrativo</p>
           </div>
 
           {import.meta.env.VITE_STATIC_MODE === "true" && (
