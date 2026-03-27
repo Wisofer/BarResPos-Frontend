@@ -9,6 +9,7 @@ export function SidebarNav({
   onToggle,
   onLogout,
   sessionLoading,
+  navItems = NAV_ITEMS,
 }) {
   return (
     <aside className="hidden rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:sticky lg:top-6 lg:flex lg:h-[calc(100vh-3rem)] lg:flex-col">
@@ -42,7 +43,7 @@ export function SidebarNav({
       )}
 
       <nav className="mt-8 space-y-2">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <button
             key={item.id}
             onClick={() => onChangeView(item.id)}

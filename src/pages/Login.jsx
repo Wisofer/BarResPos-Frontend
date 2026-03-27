@@ -38,16 +38,7 @@ export function Login() {
   };
 
   if (sessionLoading) return <SessionLoader message="Iniciando sesión..." />;
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 rounded-full border-2 border-primary-200 border-t-primary-600 animate-spin" />
-          <p className="text-sm text-slate-600">Verificando sesión...</p>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <SessionLoader message="Verificando sesión..." />;
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-100">

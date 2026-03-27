@@ -4,8 +4,8 @@ import { NAV_ITEMS } from "../constants.js";
 
 const QUICK_NAV_IDS = ["dashboard", "tables", "kitchen", "cashier"];
 
-export function MobileNav({ open, setOpen, activeView, onChangeView, onLogout, sessionLoading }) {
-  const quickNavItems = NAV_ITEMS.filter((item) => QUICK_NAV_IDS.includes(item.id));
+export function MobileNav({ open, setOpen, activeView, onChangeView, onLogout, sessionLoading, navItems = NAV_ITEMS }) {
+  const quickNavItems = navItems.filter((item) => QUICK_NAV_IDS.includes(item.id));
 
   return (
     <>
@@ -50,7 +50,7 @@ export function MobileNav({ open, setOpen, activeView, onChangeView, onLogout, s
             </button>
           </div>
           <nav className="mt-8 space-y-2">
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <button
                 key={item.id}
                 onClick={() => onChangeView(item.id)}

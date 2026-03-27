@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ChefHat, Minus, MoreVertical, Pencil, Plus, Printer, Save, Trash2, XCircle } from "lucide-react";
+import { ArrowLeft, ChefHat, Lock, Minus, MoreVertical, Pencil, Plus, Printer, Save, Trash2, XCircle } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { ListSkeleton, PosProcesarVentaModal, StatCardsSkeleton } from "../components/index.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
@@ -57,11 +57,24 @@ export function TablesView({ onPosOpenChange }) {
   const [saleBackendTotal, setSaleBackendTotal] = useState(null);
   const [saleOrdenId, setSaleOrdenId] = useState(null);
   const [saleProcessing, setSaleProcessing] = useState(false);
+  const [tipoCambio, setTipoCambio] = useState(36.8);
   const [locationsModalOpen, setLocationsModalOpen] = useState(false);
   const [locationForm, setLocationForm] = useState({ id: null, nombre: "", descripcion: "", activo: true });
   const [confirmDeleteLocation, setConfirmDeleteLocation] = useState({ open: false, id: null, name: "" });
   const [showInactiveLocations, setShowInactiveLocations] = useState(false);
+  const [cajaAbierta, setCajaAbierta] = useState(true);
   const isAdmin = isAdminUser(user);
+
+  const syncCajaEstado = async () => {
+    try {
+      const caja = await backofficeApi.cajaEstado();
+      const abierta = Boolean(caja?.abierta ?? caja?.Abierta ?? (caja?.estado || "").toLowerCase() === "abierto");
+      setCajaAbierta(abierta);
+      return abierta;
+    } catch {
+      return cajaAbierta;
+    }
+  };
 
   const normalizeLocation = (l) => ({
     id: l?.id ?? l?.Id,
@@ -89,11 +102,20 @@ export function TablesView({ onPosOpenChange }) {
 
   useEffect(() => {
     let mounted = true;
-    Promise.all([loadTables(), backofficeApi.catalogoUbicaciones()])
-      .then(([, ubic]) => {
+    Promise.all([
+      loadTables(),
+      backofficeApi.catalogoUbicaciones(),
+      backofficeApi.cajaEstado().catch(() => null),
+      backofficeApi.configuracionTipoCambio().catch(() => null),
+    ])
+      .then(([, ubic, caja, tc]) => {
         if (!mounted) return;
         const raw = Array.isArray(ubic) ? ubic : ubic?.items || [];
         setLocations(raw.map(normalizeLocation));
+        const abierta = Boolean(caja?.abierta ?? caja?.Abierta ?? (caja?.estado || "").toLowerCase() === "abierto");
+        setCajaAbierta(abierta);
+        const tcValue = Number(tc?.tipoCambioDolar ?? tc?.TipoCambioDolar ?? tc?.valor ?? 36.8);
+        if (Number.isFinite(tcValue) && tcValue > 0) setTipoCambio(tcValue);
       })
       .catch((e) => mounted && setError(e.message || "No se pudo cargar mesas."))
       .finally(() => mounted && setLoading(false));
@@ -301,6 +323,11 @@ export function TablesView({ onPosOpenChange }) {
   };
 
   const openPosView = async (table) => {
+    const abiertaAhora = await syncCajaEstado();
+    if (!abiertaAhora) {
+      snackbar.info("Caja cerrada: no se puede abrir POS en mesas.");
+      return;
+    }
     setPosOpen(true);
     setPosTable(table);
     setActiveTableMenu(null);
@@ -371,6 +398,7 @@ export function TablesView({ onPosOpenChange }) {
 
   const syncPosDeltaAdd = async (product, cantidad = 1) => {
     if (!posTable) return;
+    if (!cajaAbierta) return;
     if (posActionBusy) return;
     if (posDeltaSyncBusyRef.current) return;
     posDeltaSyncBusyRef.current = true;
@@ -404,6 +432,27 @@ export function TablesView({ onPosOpenChange }) {
       await loadTables(); // refresca la ocupación real de la mesa
     } catch (e) {
       const msg = e?.message || "No se pudo agregar el producto en backend.";
+      if (String(msg).includes("409") || msg.toLowerCase().includes("caja")) {
+        setCajaAbierta(false);
+      }
+      const normalized = String(msg)
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, "");
+      if (normalized.includes("caja") && normalized.includes("cerrada")) {
+        await syncCajaEstado();
+        // Revierte el alta optimista si backend no permitió agregar por caja cerrada.
+        setPosCart((prev) => {
+          const next = [...prev];
+          const idx = next.findIndex((x) => x.id === product.id);
+          if (idx < 0) return prev;
+          const currentQty = Number(next[idx].qty || 0);
+          const newQty = Math.max(0, currentQty - Number(cantidad || 1));
+          if (newQty <= 0) next.splice(idx, 1);
+          else next[idx] = { ...next[idx], qty: newQty };
+          return next;
+        });
+      }
       setError(msg);
       snackbar.error(msg);
     } finally {
@@ -411,7 +460,14 @@ export function TablesView({ onPosOpenChange }) {
     }
   };
 
-  const addProductToCart = (product) => {
+  const addProductToCart = async (product) => {
+    if (!cajaAbierta) {
+      const abiertaAhora = await syncCajaEstado();
+      if (!abiertaAhora) {
+        snackbar.info("Caja cerrada: no se puede agregar productos.");
+        return;
+      }
+    }
     setPosCart((prev) => {
       const idx = prev.findIndex((x) => x.id === product.id);
       if (idx >= 0) {
@@ -794,16 +850,22 @@ export function TablesView({ onPosOpenChange }) {
       const obsParts = [
         form.comentario,
         form.descuento > 0 ? `Descuento: ${form.descuento}` : null,
-        form.tipoPago === "Efectivo" ? `Recibido: ${form.montoRecibido}, Vuelto: ${form.vuelto}` : null,
+        form.moneda === "USD" ? `TC: ${form.tipoCambioAplicado}` : null,
+        form.tipoPago === "Efectivo"
+          ? `Recibido: ${form.montoRecibido} ${form.moneda}, Vuelto: ${form.vueltoMoneda} ${form.moneda} (${form.vueltoCordobas} C$)`
+          : null,
       ].filter(Boolean);
 
-      const montoPagado = form.tipoPago === "Efectivo" ? Number(form.montoRecibido || 0) : Number(form.totalAPagar || 0);
+      // Backend actualizado: interpreta monto según Moneda.
+      // Enviamos SIEMPRE base contable C$ para evitar ambigüedad.
+      const montoPagado =
+        form.tipoPago === "Efectivo" ? Number(form.montoRecibidoCordobas || 0) : Number(form.totalAPagarCordobas || 0);
 
       const payload = {
         ordenId: Number(saleOrdenId),
         tipoPago: form.tipoPago,
         montoPagado,
-        moneda: form.moneda || "C$",
+        moneda: "C",
         banco: null,
         tipoCuenta: null,
         observaciones: obsParts.join(" | ") || "Pago POS",
@@ -1029,7 +1091,7 @@ export function TablesView({ onPosOpenChange }) {
                         key={p.id}
                         type="button"
                         onClick={() => addProductToCart(p)}
-                        disabled={posActionBusy}
+                        disabled={posActionBusy || !cajaAbierta}
                         className="flex min-h-[92px] items-end rounded-md border border-slate-200 bg-gradient-to-b from-slate-200 to-slate-500 px-2 py-2 text-left text-[10px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {String(p.nombre || "Producto").toUpperCase()}
@@ -1271,7 +1333,7 @@ export function TablesView({ onPosOpenChange }) {
                       key={p.id}
                       type="button"
                       onClick={() => addProductToCart(p)}
-                      disabled={posActionBusy}
+                      disabled={posActionBusy || !cajaAbierta}
                       className="flex min-h-[86px] items-end rounded-md border border-slate-200 bg-gradient-to-b from-slate-200 to-slate-500 px-2 py-2 text-left text-[10px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {String(p.nombre || "Producto").toUpperCase()}
@@ -1291,6 +1353,7 @@ export function TablesView({ onPosOpenChange }) {
           currencySymbol="C$"
           lines={saleModalLines}
           totalOrdenBackend={saleBackendTotal}
+          exchangeRate={tipoCambio}
           busy={saleProcessing}
           onGuardar={handleGuardarVenta}
         />
@@ -1307,6 +1370,9 @@ export function TablesView({ onPosOpenChange }) {
             <span className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">Libres: {tables.filter((t) => t.status === "Libre").length}</span>
             <span className="rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700">Ocupadas: {tables.filter((t) => t.status === "Ocupada").length}</span>
             <span className="rounded-lg bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700">Reservadas: {tables.filter((t) => t.status === "Reservada").length}</span>
+            <span className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${cajaAbierta ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+              Caja: {cajaAbierta ? "Abierta" : "Cerrada"}
+            </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={openLocationsManager} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100">
@@ -1329,10 +1395,15 @@ export function TablesView({ onPosOpenChange }) {
                 {zone.items.map((table) => (
                   <article
                     key={table.id}
-                    className={`relative group rounded-xl border p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow ${
+                    className={`relative group rounded-xl border p-3 shadow-sm transition ${
+                      cajaAbierta ? "hover:-translate-y-0.5 hover:shadow" : "opacity-95"
+                    } ${
                       table.hasActiveOrder ? "border-red-600 bg-red-600 text-white" : "border-slate-200 bg-white text-slate-900"
                     }`}
                   >
+                    {!cajaAbierta && (
+                      <div className="absolute inset-0 z-10 rounded-xl bg-slate-900/20" />
+                    )}
                     {isAdmin && (
                       <>
                         {/* Desktop: botones al hacer hover */}
@@ -1424,9 +1495,15 @@ export function TablesView({ onPosOpenChange }) {
                       )}
                     </div>
 
-                    <button type="button" onClick={() => openPosView(table)} className="w-full">
+                    <button type="button" onClick={() => openPosView(table)} className="w-full" disabled={!cajaAbierta}>
                       <img src={tableIllustration} alt={`Mesa ${table.displayId}`} className="mx-auto h-28 w-full object-contain" />
                     </button>
+                    {!cajaAbierta && (
+                      <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 inline-flex items-center justify-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[11px] font-semibold text-slate-700">
+                        <Lock className="h-3.5 w-3.5" />
+                        Bloqueada por caja cerrada
+                      </div>
+                    )}
 
                   </article>
                 ))}

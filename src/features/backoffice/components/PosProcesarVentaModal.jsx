@@ -12,6 +12,7 @@ export function PosProcesarVentaModal({
   lines = [],
   /** Total desde backend (preferido) */
   totalOrdenBackend,
+  exchangeRate = 36.8,
   busy = false,
   onGuardar,
 }) {
@@ -20,6 +21,8 @@ export function PosProcesarVentaModal({
   const [tipoPago, setTipoPago] = useState("Efectivo");
   const [moneda, setMoneda] = useState("C$");
   const [comentario, setComentario] = useState("");
+  const tc = Number(exchangeRate) > 0 ? Number(exchangeRate) : 36.8;
+  const isUsd = moneda === "USD";
 
   const subtotalLineas = useMemo(
     () => lines.reduce((s, x) => s + Number(x.lineTotal ?? (x.price || 0) * (x.qty || 0)), 0),
@@ -33,10 +36,13 @@ export function PosProcesarVentaModal({
   /** Base imponible: preferimos total del sistema si existe; si no, suma de líneas. Luego restamos descuento. */
   const baseAntesDescuento =
     totalDesdeBackend != null && totalDesdeBackend > 0 ? totalDesdeBackend : subtotalLineas;
-  const totalAPagar = Math.max(0, baseAntesDescuento - descuentoNum);
+  const totalAPagarCordobas = Math.max(0, baseAntesDescuento - descuentoNum);
+  const totalAPagarMoneda = isUsd ? totalAPagarCordobas / tc : totalAPagarCordobas;
 
   const recibidoNum = Number(montoRecibido) || 0;
-  const vuelto = tipoPago === "Efectivo" ? Math.max(0, recibidoNum - totalAPagar) : 0;
+  const recibidoCordobas = isUsd ? recibidoNum * tc : recibidoNum;
+  const vueltoCordobas = tipoPago === "Efectivo" ? Math.max(0, recibidoCordobas - totalAPagarCordobas) : 0;
+  const vueltoMoneda = isUsd ? vueltoCordobas / tc : vueltoCordobas;
 
   useEffect(() => {
     if (!open) return;
@@ -48,28 +54,32 @@ export function PosProcesarVentaModal({
 
   useEffect(() => {
     if (!open) return;
-    setMontoRecibido(String(totalAPagar.toFixed(2)));
-  }, [open, totalAPagar]);
+    setMontoRecibido(String(totalAPagarMoneda.toFixed(2)));
+  }, [open, totalAPagarMoneda, moneda]);
 
   useEffect(() => {
     if (tipoPago !== "Efectivo") {
-      setMontoRecibido(String(totalAPagar.toFixed(2)));
+      setMontoRecibido(String(totalAPagarMoneda.toFixed(2)));
     }
-  }, [tipoPago, totalAPagar, open]);
+  }, [tipoPago, totalAPagarMoneda, open]);
 
   if (!open) return null;
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (tipoPago === "Efectivo" && recibidoNum + 1e-6 < totalAPagar) {
+    if (tipoPago === "Efectivo" && recibidoCordobas + 1e-6 < totalAPagarCordobas) {
       return;
     }
     onGuardar?.({
       descuento: descuentoNum,
       subtotalLineas,
-      totalAPagar,
+      totalAPagarCordobas,
+      totalAPagarMoneda,
       montoRecibido: recibidoNum,
-      vuelto,
+      montoRecibidoCordobas: recibidoCordobas,
+      vueltoCordobas,
+      vueltoMoneda,
+      tipoCambioAplicado: tc,
       tipoPago,
       moneda,
       comentario: comentario.trim(),
@@ -137,8 +147,13 @@ export function PosProcesarVentaModal({
             )}
             <div className="flex justify-between border-t border-slate-200 pt-1 text-base font-bold text-slate-900">
               <span>Total a pagar</span>
-              <span>{formatCurrency(totalAPagar, currencySymbol)}</span>
+              <span>{formatCurrency(totalAPagarMoneda, isUsd ? "$" : currencySymbol)}</span>
             </div>
+            {isUsd && (
+              <p className="text-[11px] text-slate-500">
+                Equivalente: {formatCurrency(totalAPagarCordobas, currencySymbol)} (TC: {tc.toFixed(2)})
+              </p>
+            )}
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -156,7 +171,12 @@ export function PosProcesarVentaModal({
             </label>
             <label className="text-xs font-medium text-slate-600">
               Vuelto
-              <input readOnly value={vuelto.toFixed(2)} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm text-slate-800" />
+              <input
+                readOnly
+                value={vueltoCordobas.toFixed(2)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm text-slate-800"
+              />
+              {isUsd && <p className="mt-1 text-[11px] text-slate-500">Equivalente en USD: {vueltoMoneda.toFixed(2)}</p>}
             </label>
             <label className="text-xs font-medium text-slate-600">
               Método de pago
@@ -171,7 +191,7 @@ export function PosProcesarVentaModal({
               Moneda
               <select value={moneda} onChange={(e) => setMoneda(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" disabled={busy}>
                 <option value="C$">Córdobas (C$)</option>
-                <option value="$">Dólares ($)</option>
+                <option value="USD">Dólares ($)</option>
               </select>
             </label>
             <label className="text-xs font-medium text-slate-600 sm:col-span-2">
@@ -186,7 +206,7 @@ export function PosProcesarVentaModal({
             </label>
           </div>
 
-          {tipoPago === "Efectivo" && recibidoNum + 1e-6 < totalAPagar && (
+          {tipoPago === "Efectivo" && recibidoCordobas + 1e-6 < totalAPagarCordobas && (
             <p className="mt-2 text-xs font-medium text-red-600">El efectivo recibido debe ser mayor o igual al total a pagar.</p>
           )}
         </div>
@@ -202,7 +222,7 @@ export function PosProcesarVentaModal({
           </button>
           <button
             type="submit"
-            disabled={busy || (tipoPago === "Efectivo" && recibidoNum + 1e-6 < totalAPagar)}
+            disabled={busy || (tipoPago === "Efectivo" && recibidoCordobas + 1e-6 < totalAPagarCordobas)}
             className="flex-1 rounded-xl bg-amber-500 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
           >
             {busy ? "Guardando…" : "Guardar"}

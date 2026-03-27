@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { CalendarDays, Search } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { MobileNav, SidebarNav } from "../features/backoffice/components";
+import { NAV_ITEMS } from "../features/backoffice/constants.js";
 import { backofficeApi } from "../features/backoffice/services/backofficeApi.js";
 import { resolveCurrencySymbol } from "../features/backoffice/utils/currency.js";
+import { canAccessView, getAllowedViewIds } from "../features/backoffice/utils/auth.js";
 import {
   CashierView,
   DashboardView,
@@ -35,6 +37,8 @@ export function AuthHome() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeView, setActiveView] = useState("dashboard");
   const [currencySymbol, setCurrencySymbol] = useState("C$");
+  const allowedViewIds = useMemo(() => getAllowedViewIds(user), [user]);
+  const navItems = useMemo(() => NAV_ITEMS.filter((item) => allowedViewIds.includes(item.id)), [allowedViewIds]);
 
   useEffect(() => {
     const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
@@ -63,9 +67,16 @@ export function AuthHome() {
   };
 
   const openView = (view) => {
+    if (!canAccessView(user, view)) return;
     setActiveView(view);
     setMobileMenuOpen(false);
   };
+
+  useEffect(() => {
+    if (!allowedViewIds.includes(activeView)) {
+      setActiveView(allowedViewIds[0] || "dashboard");
+    }
+  }, [activeView, allowedViewIds]);
 
   const ActiveView = useMemo(() => {
     if (activeView === "products") return ProductsView;
@@ -90,6 +101,7 @@ export function AuthHome() {
         onChangeView={openView}
         onLogout={logout}
         sessionLoading={sessionLoading}
+        navItems={navItems}
       />
 
       <div
@@ -104,6 +116,7 @@ export function AuthHome() {
           onToggle={toggleSidebar}
           onLogout={logout}
           sessionLoading={sessionLoading}
+          navItems={navItems}
         />
 
         <section className="space-y-6 pb-24 lg:pb-0 lg:pr-2">
