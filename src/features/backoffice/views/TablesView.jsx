@@ -648,6 +648,79 @@ export function TablesView({ onPosOpenChange }) {
     };
   };
 
+  const printBlobInHiddenFrame = (blob) =>
+    new Promise((resolve) => {
+      try {
+        const blobUrl = URL.createObjectURL(blob);
+        const iframe = document.createElement("iframe");
+        iframe.style.position = "fixed";
+        iframe.style.right = "0";
+        iframe.style.bottom = "0";
+        iframe.style.width = "0";
+        iframe.style.height = "0";
+        iframe.style.border = "0";
+        iframe.src = blobUrl;
+        iframe.onload = () => {
+          try {
+            setTimeout(() => {
+              try {
+                iframe.contentWindow?.focus();
+                iframe.contentWindow?.print();
+              } finally {
+                setTimeout(() => {
+                  URL.revokeObjectURL(blobUrl);
+                  iframe.remove();
+                  resolve(true);
+                }, 1500);
+              }
+            }, 150);
+          } catch {
+            URL.revokeObjectURL(blobUrl);
+            iframe.remove();
+            resolve(false);
+          }
+        };
+        iframe.onerror = () => {
+          URL.revokeObjectURL(blobUrl);
+          iframe.remove();
+          resolve(false);
+        };
+        document.body.appendChild(iframe);
+      } catch {
+        resolve(false);
+      }
+    });
+
+  const openBackendPrintUrl = async (url) => {
+    if (!url) return false;
+    const token = getToken();
+    const resolved = url?.startsWith("http") ? url : `${getApiUrl()}${url?.startsWith("/") ? url : `/${url}`}`;
+    try {
+      const res = await fetch(resolved, {
+        method: "GET",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!res.ok) return false;
+      const blob = await res.blob();
+      return await printBlobInHiddenFrame(blob);
+    } catch {
+      return false;
+    }
+  };
+
+  const openBackendPrintHtml = (html) => {
+    if (!html || typeof html !== "string") return false;
+    try {
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      printBlobInHiddenFrame(blob);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const ensurePosOrderSynced = async () => {
     if (!posTable) return posOrderId;
     if (posCart.length === 0) return posOrderId;
@@ -932,6 +1005,50 @@ export function TablesView({ onPosOpenChange }) {
     setError("");
     try {
       if (!posCommitted && posCart.length > 0) await ensurePosOrderSynced();
+      let ordenId = posOrderId ?? posOrderIdRef.current;
+
+      if (!ordenId) {
+        const raw = await backofficeApi.getMesaOrdenActiva(posTable.id);
+        const order = raw?.data ?? raw?.Data ?? raw;
+        if (!order) throw new Error("No hay orden para imprimir.");
+        ordenId = order.id ?? order.Id ?? order.ordenId ?? order.OrdenId ?? null;
+      }
+      if (!ordenId) throw new Error("No se encontró el ID de la orden.");
+
+      // Flujo oficial backend: pre-cuenta sin pagar.
+      const pre = await backofficeApi.pedidoPrecuenta(ordenId);
+      const urlPrecuenta =
+        pre?.urlImpresionPrecuenta ??
+        pre?.UrlImpresionPrecuenta ??
+        pre?.urlImpresion ??
+        pre?.UrlImpresion ??
+        null;
+      const htmlPrecuenta = pre?.htmlPrecuenta ?? pre?.HtmlPrecuenta ?? null;
+
+      if (urlPrecuenta) {
+        const opened = await openBackendPrintUrl(urlPrecuenta);
+        if (opened) {
+          snackbar.info("Pre-cuenta lista para imprimir.");
+          return;
+        }
+      }
+
+      if (htmlPrecuenta && openBackendPrintHtml(htmlPrecuenta)) {
+        snackbar.info("Pre-cuenta lista para imprimir.");
+        return;
+      }
+
+      // Fallback oficial: endpoint HTML directo.
+      try {
+        const rawHtml = await backofficeApi.pedidoPrecuentaHtml(ordenId);
+        const htmlDirect = typeof rawHtml === "string" ? rawHtml : rawHtml?.html ?? rawHtml?.Html ?? null;
+        if (htmlDirect && openBackendPrintHtml(htmlDirect)) {
+          snackbar.info("Pre-cuenta lista para imprimir.");
+          return;
+        }
+      } catch {
+        /* continue to local fallback */
+      }
 
       let lines = posCart.map((x) => ({
         id: x.id,
@@ -976,7 +1093,7 @@ export function TablesView({ onPosOpenChange }) {
         total,
         currency: "C$",
       });
-      snackbar.info("Pre-cuenta lista para imprimir.");
+      snackbar.info("Pre-cuenta lista para imprimir (modo local).");
     } catch (e) {
       const msg = e?.message || "No se pudo imprimir la cuenta.";
       setError(msg);

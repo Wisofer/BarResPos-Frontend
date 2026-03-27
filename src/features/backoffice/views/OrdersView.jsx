@@ -306,8 +306,120 @@ export function OrdersView({ currencySymbol = "C$" }) {
     }
   };
 
-  const printOrderTicket = (order) => {
+  const printBlobInHiddenFrame = (blob) =>
+    new Promise((resolve) => {
+      try {
+        const blobUrl = URL.createObjectURL(blob);
+        const iframe = document.createElement("iframe");
+        iframe.style.position = "fixed";
+        iframe.style.right = "0";
+        iframe.style.bottom = "0";
+        iframe.style.width = "0";
+        iframe.style.height = "0";
+        iframe.style.border = "0";
+        iframe.src = blobUrl;
+        iframe.onload = () => {
+          try {
+            setTimeout(() => {
+              try {
+                iframe.contentWindow?.focus();
+                iframe.contentWindow?.print();
+              } finally {
+                setTimeout(() => {
+                  URL.revokeObjectURL(blobUrl);
+                  iframe.remove();
+                  resolve(true);
+                }, 1500);
+              }
+            }, 120);
+          } catch {
+            URL.revokeObjectURL(blobUrl);
+            iframe.remove();
+            resolve(false);
+          }
+        };
+        iframe.onerror = () => {
+          URL.revokeObjectURL(blobUrl);
+          iframe.remove();
+          resolve(false);
+        };
+        document.body.appendChild(iframe);
+      } catch {
+        resolve(false);
+      }
+    });
+
+  const openBackendPrintUrl = async (url) => {
+    if (!url) return false;
+    const token = getToken();
+    const resolved = url?.startsWith("http") ? url : `${getApiUrl()}${url?.startsWith("/") ? url : `/${url}`}`;
+    try {
+      const res = await fetch(resolved, {
+        method: "GET",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!res.ok) return false;
+      const blob = await res.blob();
+      return await printBlobInHiddenFrame(blob);
+    } catch {
+      return false;
+    }
+  };
+
+  const openBackendPrintHtml = async (html) => {
+    if (!html || typeof html !== "string") return false;
+    try {
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      return await printBlobInHiddenFrame(blob);
+    } catch {
+      return false;
+    }
+  };
+
+  const printOrderTicket = async (order) => {
     if (!order) return;
+    const orderId = order?.id ?? order?.Id ?? null;
+    if (orderId) {
+      try {
+        const pre = await backofficeApi.pedidoPrecuenta(orderId);
+        const urlPrecuenta =
+          pre?.urlImpresionPrecuenta ??
+          pre?.UrlImpresionPrecuenta ??
+          pre?.urlImpresion ??
+          pre?.UrlImpresion ??
+          null;
+        const htmlPrecuenta = pre?.htmlPrecuenta ?? pre?.HtmlPrecuenta ?? null;
+
+        if (urlPrecuenta) {
+          const opened = await openBackendPrintUrl(urlPrecuenta);
+          if (opened) {
+            snackbar.info("Pre-cuenta lista para imprimir.");
+            return;
+          }
+        }
+        if (htmlPrecuenta) {
+          const openedHtml = await openBackendPrintHtml(htmlPrecuenta);
+          if (openedHtml) {
+            snackbar.info("Pre-cuenta lista para imprimir.");
+            return;
+          }
+        }
+        const htmlDirect = await backofficeApi.pedidoPrecuentaHtml(orderId).catch(() => null);
+        const directValue = typeof htmlDirect === "string" ? htmlDirect : htmlDirect?.html ?? htmlDirect?.Html ?? null;
+        if (directValue) {
+          const openedDirect = await openBackendPrintHtml(directValue);
+          if (openedDirect) {
+            snackbar.info("Pre-cuenta lista para imprimir.");
+            return;
+          }
+        }
+      } catch {
+        // fallback local
+      }
+    }
+
     const items = Array.isArray(order.items) ? order.items : [];
     const total = Number(order.monto || 0) || items.reduce((acc, it) => acc + Number(it.monto || 0), 0);
     const rows = items
