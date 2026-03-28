@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Pencil, Plus, Search, Trash2, TriangleAlert } from "lucide-react";
+import {
+  Download,
+  History,
+  PackageMinus,
+  PackagePlus,
+  Pencil,
+  Plus,
+  Search,
+  SlidersHorizontal,
+  Tags,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
-import { ListSkeleton, StatCardsSkeleton } from "../components/index.js";
+import { BackofficeDialog, ListSkeleton, StatCardsSkeleton } from "../components/index.js";
 import { formatCurrency } from "../utils/currency.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
@@ -504,15 +516,55 @@ export function ProductsView({ currencySymbol = "C$" }) {
 
         <div className="mt-2 overflow-x-auto">
           <div className="flex w-max min-w-full flex-wrap gap-2 md:w-auto md:min-w-0">
-          <button type="button" onClick={() => void openStockModal("entrada")} className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700">Entrada Stock</button>
-          <button type="button" onClick={() => void openStockModal("salida")} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700">Salida Stock</button>
-          <button type="button" onClick={() => void openStockModal("ajuste")} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700">Ajuste Stock</button>
-          <button onClick={openGlobalMovements} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700">Ver Movimientos</button>
-          <button onClick={exportProductsExcel} disabled={saving} className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
-            <Download className="h-3.5 w-3.5" />
+          <button
+            type="button"
+            onClick={() => void openStockModal("entrada")}
+            className="inline-flex items-center justify-center gap-1 rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700"
+          >
+            <PackagePlus className="h-3.5 w-3.5 shrink-0" />
+            Entrada Stock
+          </button>
+          <button
+            type="button"
+            onClick={() => void openStockModal("salida")}
+            className="inline-flex items-center justify-center gap-1 rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700"
+          >
+            <PackageMinus className="h-3.5 w-3.5 shrink-0" />
+            Salida Stock
+          </button>
+          <button
+            type="button"
+            onClick={() => void openStockModal("ajuste")}
+            className="inline-flex items-center justify-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" />
+            Ajuste Stock
+          </button>
+          <button
+            type="button"
+            onClick={openGlobalMovements}
+            className="inline-flex items-center justify-center gap-1 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+          >
+            <History className="h-3.5 w-3.5 shrink-0" />
+            Ver Movimientos
+          </button>
+          <button
+            type="button"
+            onClick={exportProductsExcel}
+            disabled={saving}
+            className="inline-flex items-center justify-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+          >
+            <Download className="h-3.5 w-3.5 shrink-0" />
             Exportar Excel
           </button>
-          <button type="button" onClick={() => setCategoriesScreen(true)} className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-700">Categorías</button>
+          <button
+            type="button"
+            onClick={() => setCategoriesScreen(true)}
+            className="inline-flex items-center justify-center gap-1 rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-700"
+          >
+            <Tags className="h-3.5 w-3.5 shrink-0" />
+            Categorías
+          </button>
         </div>
         </div>
       </div>
@@ -573,8 +625,11 @@ export function ProductsView({ currencySymbol = "C$" }) {
         })}
       </div>
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-3 sm:items-center sm:p-4">
-          <form onSubmit={saveProduct} className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl max-h-[92vh] overflow-y-auto">
+        <BackofficeDialog
+          maxWidthClass="max-w-lg"
+          onBackdropClick={saving ? undefined : () => setModalOpen(false)}
+        >
+          <form onSubmit={saveProduct} className="w-full min-w-0">
             <h3 className="text-lg font-semibold text-slate-800">{form.id ? "Editar producto" : "Nuevo producto"}</h3>
             <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
               <label className="text-xs font-semibold text-slate-600">
@@ -648,17 +703,20 @@ export function ProductsView({ currencySymbol = "C$" }) {
               Descripción
               <textarea value={form.descripcion} onChange={(e) => setForm((f) => ({ ...f, descripcion: e.target.value }))} placeholder="Información adicional del producto" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" rows={3} />
             </label>
-            <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={() => setModalOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Cancelar</button>
-              <button disabled={saving} className="rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white">{saving ? "Guardando..." : "Guardar"}</button>
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setModalOpen(false)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 sm:w-auto">Cancelar</button>
+              <button disabled={saving} className="w-full rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50 sm:w-auto">{saving ? "Guardando..." : "Guardar"}</button>
             </div>
           </form>
-        </div>
+        </BackofficeDialog>
       )}
 
       {stockModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-3 sm:items-center sm:p-4">
-          <form onSubmit={submitStockAction} className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl max-h-[92vh] overflow-y-auto">
+        <BackofficeDialog
+          maxWidthClass="max-w-lg"
+          onBackdropClick={saving || stockModalLoading ? undefined : () => setStockModalOpen(false)}
+        >
+          <form onSubmit={submitStockAction} className="w-full min-w-0">
             <h3 className="text-lg font-semibold text-slate-800">
               {stockMode === "entrada" ? "Entrada de stock" : stockMode === "salida" ? "Salida de stock" : "Ajuste de stock"}
             </h3>
@@ -843,24 +901,24 @@ export function ProductsView({ currencySymbol = "C$" }) {
               </label>
             </div>
 
-            <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={() => setStockModalOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setStockModalOpen(false)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 sm:w-auto">
                 Cancelar
               </button>
-              <button type="submit" disabled={saving || stockModalLoading} className="rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
+              <button type="submit" disabled={saving || stockModalLoading} className="w-full rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50 sm:w-auto">
                 {saving ? "Guardando..." : "Guardar"}
               </button>
             </div>
           </form>
-        </div>
+        </BackofficeDialog>
       )}
 
       {movementModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-3 sm:items-center sm:p-4">
-          <div className="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl max-h-[92vh] overflow-y-auto">
+        <BackofficeDialog maxWidthClass="max-w-3xl" onBackdropClick={() => setMovementModalOpen(false)}>
+          <div className="w-full min-w-0">
             <h3 className="text-lg font-semibold text-slate-800">Movimientos globales</h3>
             <p className="mt-1 text-xs text-slate-500">Últimos registros (hasta 200). El nombre sale del catálogo si el API solo manda el id.</p>
-            <div className="mt-3 max-h-[60vh] overflow-auto rounded-lg border border-slate-200">
+            <div className="mt-3 max-h-[min(55dvh,60vh)] overflow-auto rounded-lg border border-slate-200">
               {movementRows.length === 0 && <p className="p-4 text-sm text-slate-500">Sin movimientos.</p>}
               {movementRows.length > 0 && (
                 <table className="w-full min-w-[520px] text-left text-sm">
@@ -907,22 +965,22 @@ export function ProductsView({ currencySymbol = "C$" }) {
               )}
             </div>
             <div className="mt-4 flex justify-end">
-              <button type="button" onClick={() => setMovementModalOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">
+              <button type="button" onClick={() => setMovementModalOpen(false)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 sm:w-auto">
                 Cerrar
               </button>
             </div>
           </div>
-        </div>
+        </BackofficeDialog>
       )}
 
       {productHistoryModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-3 sm:items-center sm:p-4">
-          <div className="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl max-h-[92vh] overflow-y-auto">
+        <BackofficeDialog maxWidthClass="max-w-3xl" onBackdropClick={() => setProductHistoryModalOpen(false)}>
+          <div className="w-full min-w-0">
             <h3 className="text-lg font-semibold text-slate-800">Historial: {selectedProductName}</h3>
-            <div className="mt-3 max-h-[60vh] overflow-auto rounded-lg border border-slate-200">
+            <div className="mt-3 max-h-[min(55dvh,60vh)] overflow-auto rounded-lg border border-slate-200">
               {historyRows.length === 0 && <p className="p-4 text-sm text-slate-500">Sin movimientos para este producto.</p>}
               {historyRows.length > 0 && (
-                <table className="w-full text-left text-sm">
+                <table className="w-full min-w-[480px] text-left text-sm">
                   <thead className="sticky top-0 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="border-b border-slate-200 px-3 py-2">Tipo</th>
@@ -960,10 +1018,10 @@ export function ProductsView({ currencySymbol = "C$" }) {
               )}
             </div>
             <div className="mt-4 flex justify-end">
-              <button onClick={() => setProductHistoryModalOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Cerrar</button>
+              <button type="button" onClick={() => setProductHistoryModalOpen(false)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 sm:w-auto">Cerrar</button>
             </div>
           </div>
-        </div>
+        </BackofficeDialog>
       )}
       <ConfirmModal
         open={confirmAction.open}

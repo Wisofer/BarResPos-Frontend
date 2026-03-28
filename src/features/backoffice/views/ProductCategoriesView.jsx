@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Pencil, Plus, PowerOff, Trash2 } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
-import { ListSkeleton } from "../components/index.js";
+import { BackofficeDialog, ListSkeleton } from "../components/index.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
 
@@ -316,11 +316,8 @@ export function ProductCategoriesView({ onBackToProducts, onOpenProducts, onCate
       </section>
 
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-3 sm:items-center sm:p-4">
-          <form
-            onSubmit={saveCategory}
-            className="mt-4 w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl max-h-[92vh] overflow-y-auto sm:mt-0"
-          >
+        <BackofficeDialog maxWidthClass="max-w-lg" onBackdropClick={saving ? undefined : () => setModalOpen(false)}>
+          <form onSubmit={saveCategory} className="w-full min-w-0">
             <h3 className="text-lg font-semibold text-slate-800">{categoryForm.id ? "Editar categoría" : "Nueva categoría"}</h3>
             <div className="mt-4 grid grid-cols-1 gap-3">
               <label className="text-xs font-semibold text-slate-600">
@@ -372,20 +369,20 @@ export function ProductCategoriesView({ onBackToProducts, onOpenProducts, onCate
                 Activa
               </label>
             </div>
-            <div className="mt-5 flex justify-end gap-2">
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 sm:w-auto"
               >
                 Cancelar
               </button>
-              <button disabled={saving} className="rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white">
+              <button disabled={saving} className="w-full rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50 sm:w-auto">
                 {saving ? "Guardando..." : "Guardar"}
               </button>
             </div>
           </form>
-        </div>
+        </BackofficeDialog>
       )}
 
       <ConfirmModal

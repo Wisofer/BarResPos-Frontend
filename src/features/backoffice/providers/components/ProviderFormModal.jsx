@@ -1,9 +1,11 @@
+import { BackofficeDialog } from "../../components/index.js";
+
 export function ProviderFormModal({ open, form, setForm, saving, onSubmit, onClose }) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-3 sm:items-center sm:p-4">
-      <form onSubmit={onSubmit} className="w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
+    <BackofficeDialog maxWidthClass="max-w-lg" onBackdropClick={saving ? undefined : onClose}>
+      <form onSubmit={onSubmit} className="w-full min-w-0">
         <h3 className="text-lg font-semibold text-slate-800">{form.id ? "Editar proveedor" : "Nuevo proveedor"}</h3>
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
           <label className="text-xs font-semibold text-slate-600 md:col-span-2">
@@ -68,19 +70,19 @@ export function ProviderFormModal({ open, form, setForm, saving, onSubmit, onClo
             Activo
           </label>
         </div>
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 sm:w-auto"
           >
             Cancelar
           </button>
-          <button type="submit" disabled={saving} className="rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
+          <button type="submit" disabled={saving} className="w-full rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50 sm:w-auto">
             {saving ? "Guardando..." : "Guardar"}
           </button>
         </div>
       </form>
-    </div>
+    </BackofficeDialog>
   );
 }

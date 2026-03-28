@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, Eye, FilterX, Pencil, Search, XCircle } from "lucide-react";
+import { ArrowLeft, Check, Download, Eye, FilterX, Pencil, Printer, Search, X, XCircle } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { ListSkeleton } from "../components/index.js";
 import { formatCurrency } from "../utils/currency.js";
@@ -519,10 +519,34 @@ export function OrdersView({ currencySymbol = "C$" }) {
               <p className="text-sm text-slate-500">Vista completa del pedido y sus productos.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button type="button" onClick={() => { setShowDetail(false); setShowEdit(false); }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Volver</button>
-              <button type="button" onClick={() => printOrderTicket(detailOrder)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Imprimir</button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDetail(false);
+                  setShowEdit(false);
+                }}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <ArrowLeft className="h-3.5 w-3.5 shrink-0" />
+                Volver
+              </button>
+              <button
+                type="button"
+                onClick={() => printOrderTicket(detailOrder)}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <Printer className="h-3.5 w-3.5 shrink-0" />
+                Imprimir
+              </button>
               {isAdmin && !showEdit && (
-                <button type="button" onClick={() => openEdit(detailOrder)} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">Editar</button>
+                <button
+                  type="button"
+                  onClick={() => openEdit(detailOrder)}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                >
+                  <Pencil className="h-3.5 w-3.5 shrink-0" />
+                  Editar
+                </button>
               )}
             </div>
           </div>
@@ -601,33 +625,217 @@ export function OrdersView({ currencySymbol = "C$" }) {
           </div>
         ) : (
           <form onSubmit={saveEdit} className="space-y-4">
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-              <input value={editForm.mesaId} onChange={(e) => setEditForm((s) => ({ ...s, mesaId: e.target.value }))} placeholder="Mesa ID" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-              <input value={editForm.clienteId} onChange={(e) => setEditForm((s) => ({ ...s, clienteId: e.target.value }))} placeholder="Cliente ID" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-              <input value={editForm.meseroId} onChange={(e) => setEditForm((s) => ({ ...s, meseroId: e.target.value }))} placeholder="Mesero ID" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-              <select value={editForm.estado} onChange={(e) => setEditForm((s) => ({ ...s, estado: e.target.value }))} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                {["Pendiente", "En cocina", "Listo", "Entregado", "Pagado", "Cancelado"].map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <input value={editForm.estadoCocina} onChange={(e) => setEditForm((s) => ({ ...s, estadoCocina: e.target.value }))} placeholder="Estado cocina" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-              <input value={editForm.observaciones} onChange={(e) => setEditForm((s) => ({ ...s, observaciones: e.target.value }))} placeholder="Observaciones" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <div className="rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900">
+              <p className="font-semibold">Modo edición</p>
+              <p className="mt-0.5 text-xs text-amber-800/90">Ajusta los datos del pedido y las líneas; guarda para aplicar o cancela para volver al detalle sin cambios.</p>
             </div>
-            <div className="rounded-lg border border-slate-200 p-3">
-              <p className="mb-2 text-sm font-semibold text-slate-800">Items (edicion completa)</p>
-              <div className="space-y-2">
-                {editForm.items.map((it, idx) => (
-                  <div key={`${it.servicioId}-${idx}`} className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 md:grid-cols-5">
-                    <input value={it.servicioId} onChange={(e) => setEditForm((s) => ({ ...s, items: s.items.map((x, i) => (i === idx ? { ...x, servicioId: e.target.value } : x)) }))} className="rounded-md border border-slate-300 px-2 py-1 text-xs" placeholder="Servicio ID" />
-                    <input type="number" min="1" value={it.cantidad} onChange={(e) => setEditForm((s) => ({ ...s, items: s.items.map((x, i) => (i === idx ? { ...x, cantidad: e.target.value } : x)) }))} className="rounded-md border border-slate-300 px-2 py-1 text-xs" placeholder="Cantidad" />
-                    <input type="number" step="0.01" min="0" value={it.precioUnitario} onChange={(e) => setEditForm((s) => ({ ...s, items: s.items.map((x, i) => (i === idx ? { ...x, precioUnitario: e.target.value } : x)) }))} className="rounded-md border border-slate-300 px-2 py-1 text-xs" placeholder="Precio unitario" />
-                    <input value={it.estado} onChange={(e) => setEditForm((s) => ({ ...s, items: s.items.map((x, i) => (i === idx ? { ...x, estado: e.target.value } : x)) }))} className="rounded-md border border-slate-300 px-2 py-1 text-xs" placeholder="Estado item" />
-                    <input value={it.notas} onChange={(e) => setEditForm((s) => ({ ...s, items: s.items.map((x, i) => (i === idx ? { ...x, notas: e.target.value } : x)) }))} className="rounded-md border border-slate-300 px-2 py-1 text-xs" placeholder="Notas" />
-                  </div>
-                ))}
+
+            <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+              <h3 className="text-sm font-semibold text-slate-800">Información del pedido</h3>
+              <p className="mt-0.5 text-xs text-slate-500">Mesa, cliente, mesero y estado general (misma jerarquía que en la vista de solo lectura).</p>
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <label className="text-xs font-semibold text-slate-600">
+                  Mesa ID
+                  <input
+                    type="number"
+                    min="1"
+                    value={editForm.mesaId}
+                    onChange={(e) => setEditForm((s) => ({ ...s, mesaId: e.target.value }))}
+                    placeholder="Ej. 13"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="text-xs font-semibold text-slate-600">
+                  Cliente ID
+                  <input
+                    type="number"
+                    min="0"
+                    value={editForm.clienteId}
+                    onChange={(e) => setEditForm((s) => ({ ...s, clienteId: e.target.value }))}
+                    placeholder="Opcional"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="text-xs font-semibold text-slate-600">
+                  Mesero ID
+                  <input
+                    type="number"
+                    min="0"
+                    value={editForm.meseroId}
+                    onChange={(e) => setEditForm((s) => ({ ...s, meseroId: e.target.value }))}
+                    placeholder="Ej. 1"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="text-xs font-semibold text-slate-600">
+                  Estado del pedido
+                  <select
+                    value={editForm.estado}
+                    onChange={(e) => setEditForm((s) => ({ ...s, estado: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    {["Pendiente", "En cocina", "Despacho", "Listo", "Entregado", "Pagado", "Cancelado"].map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs font-semibold text-slate-600">
+                  Estado cocina (KDS)
+                  <select
+                    value={editForm.estadoCocina}
+                    onChange={(e) => setEditForm((s) => ({ ...s, estadoCocina: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">Sin definir</option>
+                    {["Pendiente", "En cocina", "Listo", "Entregado", "Cancelado"].map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
-            </div>
-            <div className="flex items-center justify-end gap-2">
-              <button type="button" onClick={() => setShowEdit(false)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">Cancelar</button>
-              <button type="submit" disabled={busyAction} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">Guardar cambios</button>
+              <label className="mt-4 block text-xs font-semibold text-slate-600">
+                Observaciones
+                <textarea
+                  value={editForm.observaciones}
+                  onChange={(e) => setEditForm((s) => ({ ...s, observaciones: e.target.value }))}
+                  placeholder="Notas del pedido (opcional)"
+                  rows={3}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+            </article>
+
+            <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+              <h3 className="text-sm font-semibold text-slate-800">Productos del pedido</h3>
+              <p className="mt-0.5 text-xs text-slate-500">Edita cantidad, precio unitario, estado de línea y notas. El ID de producto/servicio debe coincidir con el catálogo.</p>
+              <div className="mt-4 space-y-4">
+                {editForm.items.map((it, idx) => {
+                  const q = Number(it.cantidad) || 0;
+                  const pu = Number(it.precioUnitario) || 0;
+                  const sub = q * pu;
+                  return (
+                    <div
+                      key={`${it.servicioId}-${idx}`}
+                      className="rounded-lg border border-slate-200 bg-slate-50/90 p-4 shadow-sm"
+                    >
+                      <div className="mb-3 flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 pb-3">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-slate-800">{it.servicio || "Producto"}</p>
+                          <p className="mt-0.5 text-xs text-slate-500">Línea {idx + 1}</p>
+                        </div>
+                        <span className="shrink-0 rounded-md bg-white px-2 py-1 text-xs font-semibold tabular-nums text-slate-700 ring-1 ring-slate-200">
+                          Subtotal {formatCurrency(sub, currencySymbol)}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <label className="text-xs font-semibold text-slate-600 sm:col-span-2 lg:col-span-1">
+                          ID producto / servicio
+                          <input
+                            type="number"
+                            min="1"
+                            value={it.servicioId === undefined || it.servicioId === null ? "" : String(it.servicioId)}
+                            onChange={(e) =>
+                              setEditForm((s) => ({
+                                ...s,
+                                items: s.items.map((x, i) => (i === idx ? { ...x, servicioId: e.target.value } : x)),
+                              }))
+                            }
+                            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                          />
+                        </label>
+                        <label className="text-xs font-semibold text-slate-600">
+                          Cantidad
+                          <input
+                            type="number"
+                            min="1"
+                            value={it.cantidad}
+                            onChange={(e) =>
+                              setEditForm((s) => ({
+                                ...s,
+                                items: s.items.map((x, i) => (i === idx ? { ...x, cantidad: e.target.value } : x)),
+                              }))
+                            }
+                            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                          />
+                        </label>
+                        <label className="text-xs font-semibold text-slate-600">
+                          Precio unitario ({currencySymbol})
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={it.precioUnitario}
+                            onChange={(e) =>
+                              setEditForm((s) => ({
+                                ...s,
+                                items: s.items.map((x, i) => (i === idx ? { ...x, precioUnitario: e.target.value } : x)),
+                              }))
+                            }
+                            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                          />
+                        </label>
+                        <label className="text-xs font-semibold text-slate-600">
+                          Estado de la línea
+                          <select
+                            value={it.estado}
+                            onChange={(e) =>
+                              setEditForm((s) => ({
+                                ...s,
+                                items: s.items.map((x, i) => (i === idx ? { ...x, estado: e.target.value } : x)),
+                              }))
+                            }
+                            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                          >
+                            <option value="">Sin definir</option>
+                            {["Pendiente", "En cocina", "Listo", "Entregado", "Cancelado"].map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      <label className="mt-3 block text-xs font-semibold text-slate-600">
+                        Notas
+                        <input
+                          value={it.notas}
+                          onChange={(e) =>
+                            setEditForm((s) => ({
+                              ...s,
+                              items: s.items.map((x, i) => (i === idx ? { ...x, notas: e.target.value } : x)),
+                            }))
+                          }
+                          placeholder="Opcional"
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        />
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            </article>
+
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
+              <button
+                type="button"
+                onClick={() => setShowEdit(false)}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 sm:w-auto w-full"
+              >
+                <X className="h-3.5 w-3.5 shrink-0" />
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={busyAction}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50 sm:w-auto w-full"
+              >
+                <Check className="h-3.5 w-3.5 shrink-0" />
+                {busyAction ? "Guardando…" : "Guardar cambios"}
+              </button>
             </div>
           </form>
         )}

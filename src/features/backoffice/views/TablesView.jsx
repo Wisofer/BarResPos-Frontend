@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ChefHat, Lock, Minus, MoreVertical, Pencil, Plus, Printer, Save, Trash2, XCircle } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
-import { ListSkeleton, PosProcesarVentaModal, StatCardsSkeleton } from "../components/index.js";
+import { BackofficeDialog, ListSkeleton, PosProcesarVentaModal, StatCardsSkeleton } from "../components/index.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
 import { formatCurrency } from "../utils/currency.js";
@@ -1686,8 +1686,8 @@ export function TablesView({ onPosOpenChange }) {
       </section>
 
       {formOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-3 sm:items-center sm:p-4">
-          <form onSubmit={saveTable} className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl max-h-[92vh] overflow-y-auto">
+        <BackofficeDialog maxWidthClass="max-w-md" onBackdropClick={saving ? undefined : () => setFormOpen(false)}>
+          <form onSubmit={saveTable} className="w-full min-w-0">
             <h3 className="text-lg font-semibold text-slate-800">{form.id ? "Editar mesa" : "Nueva mesa"}</h3>
             <div className="mt-4 space-y-3">
               <input value={form.numero} onChange={(e) => setForm((f) => ({ ...f, numero: e.target.value }))} placeholder="Numero" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
@@ -1702,17 +1702,17 @@ export function TablesView({ onPosOpenChange }) {
                 <option>Libre</option><option>Ocupada</option><option>Reservada</option>
               </select>
             </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={() => setFormOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Cancelar</button>
-              <button disabled={saving} className="rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white">{saving ? "Guardando..." : "Guardar"}</button>
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setFormOpen(false)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 sm:w-auto">Cancelar</button>
+              <button disabled={saving} className="w-full rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50 sm:w-auto">{saving ? "Guardando..." : "Guardar"}</button>
             </div>
           </form>
-        </div>
+        </BackofficeDialog>
       )}
 
       {locationsModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-3 sm:items-center sm:p-4">
-          <div className="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl max-h-[92vh] overflow-y-auto">
+        <BackofficeDialog maxWidthClass="max-w-3xl" onBackdropClick={saving ? undefined : () => setLocationsModalOpen(false)}>
+          <div className="w-full min-w-0">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-slate-800">Ubicaciones de mesas</h3>
@@ -1752,15 +1752,15 @@ export function TablesView({ onPosOpenChange }) {
                   />
                   Activa
                 </label>
-                <div className="flex justify-end gap-2">
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <button
                     type="button"
                     onClick={() => setLocationForm({ id: null, nombre: "", descripcion: "", activo: true })}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 sm:w-auto"
                   >
                     Limpiar
                   </button>
-                  <button disabled={saving} className="rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60">
+                  <button disabled={saving} className="w-full rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60 sm:w-auto">
                     {saving ? "Guardando..." : "Guardar"}
                   </button>
                 </div>
@@ -1794,7 +1794,7 @@ export function TablesView({ onPosOpenChange }) {
                       <p className="truncate text-sm font-semibold text-slate-800">{l.nombre || l.descripcion || `Ubicación ${l.id}`}</p>
                       <p className="truncate text-xs text-slate-500">{l.descripcion || "-"}</p>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
                       {l.activo === false ? (
                         <button
                           type="button"
@@ -1826,12 +1826,12 @@ export function TablesView({ onPosOpenChange }) {
               </div>
             </div>
           </div>
-        </div>
+        </BackofficeDialog>
       )}
 
       {detailOpen && selectedTable && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-3 sm:items-center sm:p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl max-h-[92vh] overflow-y-auto">
+        <BackofficeDialog maxWidthClass="max-w-lg" onBackdropClick={() => setDetailOpen(false)}>
+          <div className="w-full min-w-0">
             <h3 className="text-lg font-semibold text-slate-800">Mesa {selectedTable.displayId}</h3>
             <p className="mt-1 text-sm text-slate-600">Estado: {selectedTable.status} | Capacidad: {selectedTable.capacity}</p>
             <div className="mt-4 rounded-lg border border-slate-200 p-3 text-sm">
@@ -1845,10 +1845,10 @@ export function TablesView({ onPosOpenChange }) {
               )}
             </div>
             <div className="mt-4 flex justify-end">
-              <button onClick={() => setDetailOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Cerrar</button>
+              <button type="button" onClick={() => setDetailOpen(false)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 sm:w-auto">Cerrar</button>
             </div>
           </div>
-        </div>
+        </BackofficeDialog>
       )}
       <ConfirmModal
         open={confirmDeleteTable.open}

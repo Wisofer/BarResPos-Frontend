@@ -35,7 +35,7 @@ export function SnackbarItem({ id, message, variant = "success", duration = 4200
       role="status"
       aria-live="polite"
       className={cn(
-        "flex items-center gap-4 rounded-2xl border px-5 py-4 min-w-[320px] max-w-[440px] snackbar-item-enter",
+        "flex w-full max-w-[min(440px,calc(100vw-1.5rem))] min-w-0 items-center gap-3 rounded-2xl border px-4 py-3 sm:min-w-[280px] sm:max-w-[440px] sm:gap-4 sm:px-5 sm:py-4 snackbar-item-enter",
         config.className
       )}
     >
@@ -57,7 +57,7 @@ export function SnackbarItem({ id, message, variant = "success", duration = 4200
 
 export function SnackbarStack({ items, onDismiss }) {
   return (
-    <div className="fixed top-5 right-5 z-[100] flex flex-col gap-3 pointer-events-none [&>*]:pointer-events-auto">
+    <div className="fixed inset-x-3 top-4 z-[100] flex flex-col gap-3 pointer-events-none sm:inset-x-auto sm:right-5 sm:left-auto sm:top-5 [&>*]:pointer-events-auto">
       {items.map((item) => (
         <SnackbarItem
           key={item.id}

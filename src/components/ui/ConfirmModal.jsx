@@ -29,15 +29,15 @@ export function ConfirmModal({
           <AlertTriangle className="w-6 h-6" />
         </div>
         <p className="text-slate-700 dark:text-slate-200">{message}</p>
-        <div className="flex gap-2 w-full justify-end pt-2">
-          <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
+        <div className="flex w-full flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+          <Button type="button" variant="secondary" onClick={onClose} disabled={loading} className="w-full sm:w-auto">
             Cancelar
           </Button>
           <button
             type="button"
             onClick={handleConfirm}
             disabled={loading}
-            className={`inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 ${btnClass}`}
+            className={`inline-flex w-full items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 sm:w-auto ${btnClass}`}
           >
             {loading ? "Procesando..." : confirmLabel}
           </button>
