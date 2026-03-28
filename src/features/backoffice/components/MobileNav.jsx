@@ -4,23 +4,25 @@ import { NAV_ITEMS } from "../constants.js";
 
 const QUICK_NAV_IDS = ["dashboard", "tables", "kitchen", "cashier"];
 
-export function MobileNav({ open, setOpen, activeView, onChangeView, onLogout, sessionLoading, navItems = NAV_ITEMS }) {
+export function MobileNav({ open, setOpen, activeView, onChangeView, onLogout, sessionLoading, navItems = NAV_ITEMS, topBarEnd = null }) {
   const quickNavItems = navItems.filter((item) => QUICK_NAV_IDS.includes(item.id));
 
   return (
     <>
-      <header className="mb-4 flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-3 shadow-sm lg:hidden">
-        <div className="flex items-center gap-3">
-          <img src="/assets/images/logo.png" alt={`${APP_NAME} logo`} className="h-9 w-9 rounded-lg object-contain" />
-          <div>
-            <p className="text-sm font-bold text-slate-800">{APP_NAME}</p>
-            <p className="text-[11px] text-slate-500">Panel administrativo</p>
+      <header className="mb-4 flex min-h-[52px] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-2 py-2 shadow-sm sm:gap-3 sm:px-3 sm:py-2.5 lg:hidden">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+          <img src="/assets/images/logo.png" alt={`${APP_NAME} logo`} className="h-8 w-8 shrink-0 rounded-lg object-contain sm:h-9 sm:w-9" />
+          <div className="min-w-0">
+            <p className="truncate text-xs font-bold text-slate-800 sm:text-sm">{APP_NAME}</p>
+            <p className="truncate text-[10px] text-slate-500 sm:text-[11px]">Panel administrativo</p>
           </div>
         </div>
+        {topBarEnd ? <div className="flex shrink-0 items-center">{topBarEnd}</div> : null}
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600"
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 touch-manipulation active:bg-slate-50"
+          aria-label="Abrir menú"
         >
           <Menu className="h-5 w-5" />
         </button>

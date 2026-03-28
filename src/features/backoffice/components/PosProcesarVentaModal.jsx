@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { formatCurrency } from "../utils/currency.js";
 
 /**
- * Modal tipo "Procesar venta": totales, efectivo recibido, vuelto, método de pago.
+ * Modal "Procesar venta": totales, efectivo recibido / vuelto, u otros métodos al total exacto.
+ * No hay pago mixto en UI: Tarjeta/Transferencia fijan el monto al total (igual que antes con la opción Mixto retirada).
  */
 export function PosProcesarVentaModal({
   open,
@@ -158,7 +159,7 @@ export function PosProcesarVentaModal({
 
           <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
             <label className="text-xs font-medium text-slate-600">
-              Total efectivo (recibido)
+              {tipoPago === "Efectivo" ? "Total efectivo (recibido)" : "Monto cobrado (= total)"}
               <input
                 type="number"
                 min="0"
@@ -184,7 +185,6 @@ export function PosProcesarVentaModal({
                 <option>Efectivo</option>
                 <option>Tarjeta</option>
                 <option>Transferencia</option>
-                <option>Mixto</option>
               </select>
             </label>
             <label className="text-xs font-medium text-slate-600">

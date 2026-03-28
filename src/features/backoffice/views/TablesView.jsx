@@ -19,6 +19,19 @@ import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
 import { formatCurrency } from "../utils/currency.js";
 import { buildUpdatePedidoPayloadForMesaChange } from "../utils/pedidoMesa.js";
+import {
+  extractPosOrdenResponseId,
+  getEstadoCocinaOrden,
+  getOrdenItems,
+  getOrdenPedidoId,
+  getPedidoMontoNumeric,
+  isCajaCerradaMessageNormalized,
+  isStockShortageConflict409,
+  mapBackendItemsToCart,
+  normalizeApiErrorMessage,
+  posCartToModalLines,
+  unwrapEnvelope,
+} from "../utils/posPedido.js";
 import { isAdminUser } from "../utils/auth.js";
 import { useAuth } from "../../../contexts/AuthContext.jsx";
 import { getToken } from "../../../api/token.js";
@@ -367,18 +380,12 @@ export function TablesView({ onPosOpenChange }) {
         backofficeApi.listProductos({ page: 1, pageSize: 200, activos: true }),
         backofficeApi.catalogoCategoriasProducto(),
       ]);
-      const orderActive = orderActiva?.data ?? orderActiva?.Data ?? orderActiva;
-      setPosOrderId(
-        orderActive?.id ??
-          orderActive?.Id ??
-          orderActive?.ordenId ??
-          orderActive?.pedidoId ??
-          null
-      );
+      const orderActive = unwrapEnvelope(orderActiva);
+      setPosOrderId(getOrdenPedidoId(orderActive, null));
 
       // Si ya hay productos agregados en backend para esta mesa,
       // sincronizamos la UI para que no se "pierdan" al volver a entrar al POS.
-      const backendItems = orderActive?.items ?? orderActive?.Items;
+      const backendItems = getOrdenItems(orderActive);
       if (backendItems) {
         setPosCart(mapBackendItemsToCart(backendItems));
         setPosCommitted(true);
@@ -449,17 +456,7 @@ export function TablesView({ onPosOpenChange }) {
         };
         try {
           const data = await backofficeApi.posOrdenes(body);
-          const newOrderId =
-            data?.id ??
-            data?.Id ??
-            data?.ordenId ??
-            data?.OrdenId ??
-            data?.pedidoId ??
-            data?.PedidoId ??
-            data?.facturaId ??
-            data?.FacturaId ??
-            currentId ??
-            null;
+          const newOrderId = extractPosOrdenResponseId(data, currentId);
 
           if (newOrderId && newOrderId !== posOrderIdRef.current) {
             setPosOrderId(newOrderId);
@@ -471,22 +468,13 @@ export function TablesView({ onPosOpenChange }) {
           rollbackPosLineQty(product.id, cantidad);
           const msg = e?.message || "No se pudo agregar el producto en backend.";
           const status = e?.status;
-          const normalized = String(msg)
-            .toLowerCase()
-            .normalize("NFD")
-            .replace(/\p{Diacritic}/gu, "");
-          const cajaCerrada = normalized.includes("caja") && normalized.includes("cerrada");
+          const normalized = normalizeApiErrorMessage(msg);
+          const cajaCerrada = isCajaCerradaMessageNormalized(normalized);
           if (cajaCerrada) {
             setCajaAbierta(false);
             await syncCajaEstado();
           }
-          const stockConflict =
-            status === 409 &&
-            !cajaCerrada &&
-            (normalized.includes("stock") ||
-              normalized.includes("inventario") ||
-              normalized.includes("insuficiente") ||
-              (normalized.includes("disponible") && normalized.includes("solicit")));
+          const stockConflict = isStockShortageConflict409(status, normalized, cajaCerrada);
           snackbar.error(stockConflict && !/^stock\b/i.test(msg) ? `Stock: ${msg}` : msg);
           setError(msg);
         }
@@ -597,55 +585,6 @@ export function TablesView({ onPosOpenChange }) {
     loadTables();
   };
 
-  const mapBackendItemsToCart = (items) => {
-    const list = Array.isArray(items) ? items : [];
-    return list
-      .map((it, idx) => {
-        const productoId =
-          it?.productoId ??
-          it?.ProductoId ??
-          it?.servicioId ??
-          it?.ServicioId ??
-          it?.producto?.id ??
-          it?.Producto?.Id ??
-          it?.servicio?.id ??
-          it?.Servicio?.Id ??
-          it?.id ??
-          idx;
-
-        const qty = Number(it?.cantidad ?? it?.Cantidad ?? it?.qty ?? 0);
-        const montoLinea = Number(it?.monto ?? it?.Monto ?? it?.total ?? it?.Total ?? it?.importe ?? it?.Importe ?? 0);
-        const priceUnit = Number(
-          it?.precioUnitario ?? it?.PrecioUnitario ?? it?.precio ?? it?.Precio ?? it?.precioUnitarioServicio ?? 0
-        );
-        const computedPrice = priceUnit > 0 ? priceUnit : qty > 0 ? montoLinea / qty : 0;
-        const name =
-          it?.producto?.nombre ??
-          it?.Producto?.Nombre ??
-          it?.servicio?.nombre ??
-          it?.Servicio?.Nombre ??
-          it?.nombre ??
-          it?.Nombre ??
-          it?.productoNombre ??
-          it?.ProductoNombre ??
-          it?.servicioNombre ??
-          it?.ServicioNombre ??
-          it?.servicio ??
-          it?.Servicio ??
-          it?.producto ??
-          it?.Producto ??
-          "Producto";
-
-        return {
-          id: Number.isNaN(Number(productoId)) ? idx : Number(productoId),
-          name: String(name),
-          price: Number.isFinite(computedPrice) ? computedPrice : 0,
-          qty: qty > 0 ? qty : 0,
-        };
-      })
-      .filter((x) => x.qty > 0);
-  };
-
   const openMoveOrderDialog = async () => {
     if (!posTable) return;
     const oid = posOrderId ?? posOrderIdRef.current;
@@ -727,9 +666,9 @@ export function TablesView({ onPosOpenChange }) {
         newTable = fromList;
       }
 
-      const orderActive = rawOrden?.data ?? rawOrden?.Data ?? rawOrden;
-      const nextId = orderActive?.id ?? orderActive?.Id ?? orderActive?.ordenId ?? orderActive?.pedidoId ?? orderId;
-      const backendItems = orderActive?.items ?? orderActive?.Items;
+      const orderActive = unwrapEnvelope(rawOrden);
+      const nextId = getOrdenPedidoId(orderActive, orderId);
+      const backendItems = getOrdenItems(orderActive);
       let nextCart = posCartRef.current;
       if (backendItems?.length) {
         nextCart = mapBackendItemsToCart(backendItems);
@@ -911,18 +850,7 @@ export function TablesView({ onPosOpenChange }) {
           observaciones: "",
           productos,
         });
-        const newOrderId =
-          data?.id ??
-          data?.Id ??
-          data?.ordenId ??
-          data?.OrdenId ??
-          data?.pedidoId ??
-          data?.PedidoId ??
-          data?.facturaId ??
-          data?.FacturaId ??
-          data?.orden?.id ??
-          data?.orden?.Id ??
-          null;
+        const newOrderId = extractPosOrdenResponseId(data, null);
         if (!newOrderId) throw new Error("No se pudo crear la orden activa en backend.");
         setPosOrderId(newOrderId);
       }
@@ -951,8 +879,8 @@ export function TablesView({ onPosOpenChange }) {
       });
 
       const freshRaw = await backofficeApi.getMesaOrdenActiva(posTable.id).catch(() => null);
-      const fresh = freshRaw?.data ?? freshRaw?.Data ?? freshRaw;
-      const backendItems = fresh?.items ?? fresh?.Items;
+      const fresh = unwrapEnvelope(freshRaw);
+      const backendItems = getOrdenItems(fresh);
       if (backendItems) setPosCart(mapBackendItemsToCart(backendItems));
 
       setPosCommitted(true);
@@ -960,21 +888,13 @@ export function TablesView({ onPosOpenChange }) {
     } catch (e) {
       const msg = e?.message || "No se pudo enviar la orden.";
       const status = e?.status;
-      const normalized = String(msg)
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/\p{Diacritic}/gu, "");
-      const stockConflict =
-        status === 409 &&
-        (normalized.includes("stock") ||
-          normalized.includes("inventario") ||
-          normalized.includes("insuficiente") ||
-          (normalized.includes("disponible") && normalized.includes("solicit")));
+      const normalized = normalizeApiErrorMessage(msg);
+      const stockConflict = isStockShortageConflict409(status, normalized, false);
       if (status === 409 && posTable) {
         try {
           const freshRaw = await backofficeApi.getMesaOrdenActiva(posTable.id);
-          const fresh = freshRaw?.data ?? freshRaw?.Data ?? freshRaw;
-          const backendItems = fresh?.items ?? fresh?.Items;
+          const fresh = unwrapEnvelope(freshRaw);
+          const backendItems = getOrdenItems(fresh);
           if (backendItems) setPosCart(mapBackendItemsToCart(backendItems));
         } catch {
           /* ignore */
@@ -1021,21 +941,16 @@ export function TablesView({ onPosOpenChange }) {
       // Si la orden ya existía (posCart vacío), cargamos items para mantener UI sincronizada.
       if (!posCommitted && posCart.length === 0) {
         const freshRaw = await backofficeApi.getMesaOrdenActiva(posTable.id).catch(() => null);
-        const fresh = freshRaw?.data ?? freshRaw?.Data ?? freshRaw;
-        const items = fresh?.items ?? fresh?.Items;
+        const fresh = unwrapEnvelope(freshRaw);
+        const items = getOrdenItems(fresh);
         if (items) setPosCart(mapBackendItemsToCart(items));
         setPosCommitted(true);
       }
 
       // Para que "Enviar cocina" haga algo real, sincronizamos el EstadoCocina.
       const freshRaw2 = await backofficeApi.getMesaOrdenActiva(posTable.id).catch(() => null);
-      const fresh2 = freshRaw2?.data ?? freshRaw2?.Data ?? freshRaw2;
-      const estadoCocinaActual =
-        fresh2?.estadoCocina ??
-        fresh2?.EstadoCocina ??
-        fresh2?.estado_cocina ??
-        fresh2?.Estado_cocina ??
-        null;
+      const fresh2 = unwrapEnvelope(freshRaw2);
+      const estadoCocinaActual = getEstadoCocinaOrden(fresh2);
 
       // Si ya está "Listo", mantenemos. Si está "Pendiente", lo movemos a "En Preparación".
       const nextEstadoCocina = estadoCocinaActual === "Pendiente" ? "En Preparación" : "Listo";
@@ -1058,29 +973,16 @@ export function TablesView({ onPosOpenChange }) {
       if (posCart.length > 0) await ensurePosOrderSynced();
 
       let ordenId = posOrderId ?? posOrderIdRef.current;
-      let lines = posCart.map((x) => ({
-        id: x.id,
-        name: x.name,
-        qty: x.qty,
-        price: x.price,
-        lineTotal: Number(x.price || 0) * Number(x.qty || 0),
-      }));
+      let lines = posCartToModalLines(posCart);
 
       if (lines.length === 0) {
         const raw = await backofficeApi.getMesaOrdenActiva(posTable.id);
-        const order = raw?.data ?? raw?.Data ?? raw;
+        const order = unwrapEnvelope(raw);
         if (!order) throw new Error("No hay orden activa para cobrar.");
-        ordenId = order.id ?? order.Id ?? order.ordenId ?? order.OrdenId ?? ordenId;
-        const backendItems = order.items ?? order.Items;
+        ordenId = getOrdenPedidoId(order, ordenId);
+        const backendItems = getOrdenItems(order);
         if (!backendItems?.length) throw new Error("La orden no tiene productos.");
-        const mapped = mapBackendItemsToCart(backendItems);
-        lines = mapped.map((x) => ({
-          id: x.id,
-          name: x.name,
-          qty: x.qty,
-          price: x.price,
-          lineTotal: Number(x.price || 0) * Number(x.qty || 0),
-        }));
+        lines = posCartToModalLines(mapBackendItemsToCart(backendItems));
       }
 
       if (!ordenId) throw new Error("No hay orden activa para cobrar.");
@@ -1088,8 +990,7 @@ export function TablesView({ onPosOpenChange }) {
       let totalBackend = null;
       try {
         const pedido = await backofficeApi.getPedido(ordenId);
-        const m = pedido?.monto ?? pedido?.Monto ?? pedido?.total ?? pedido?.Total;
-        if (m != null && Number.isFinite(Number(m))) totalBackend = Number(m);
+        totalBackend = getPedidoMontoNumeric(pedido);
       } catch {
         /* ignore */
       }
@@ -1200,9 +1101,9 @@ export function TablesView({ onPosOpenChange }) {
 
       if (!ordenId) {
         const raw = await backofficeApi.getMesaOrdenActiva(posTable.id);
-        const order = raw?.data ?? raw?.Data ?? raw;
+        const order = unwrapEnvelope(raw);
         if (!order) throw new Error("No hay orden para imprimir.");
-        ordenId = order.id ?? order.Id ?? order.ordenId ?? order.OrdenId ?? null;
+        ordenId = getOrdenPedidoId(order, null);
       }
       if (!ordenId) throw new Error("No se encontró el ID de la orden.");
 
@@ -1241,28 +1142,15 @@ export function TablesView({ onPosOpenChange }) {
         /* continue to local fallback */
       }
 
-      let lines = posCart.map((x) => ({
-        id: x.id,
-        name: x.name,
-        qty: x.qty,
-        price: x.price,
-        lineTotal: Number(x.price || 0) * Number(x.qty || 0),
-      }));
+      let lines = posCartToModalLines(posCart);
 
       if (lines.length === 0) {
         const raw = await backofficeApi.getMesaOrdenActiva(posTable.id);
-        const order = raw?.data ?? raw?.Data ?? raw;
+        const order = unwrapEnvelope(raw);
         if (!order) throw new Error("No hay orden para imprimir.");
-        const backendItems = order.items ?? order.Items;
+        const backendItems = getOrdenItems(order);
         if (!backendItems?.length) throw new Error("No hay productos en la orden.");
-        const mapped = mapBackendItemsToCart(backendItems);
-        lines = mapped.map((x) => ({
-          id: x.id,
-          name: x.name,
-          qty: x.qty,
-          price: x.price,
-          lineTotal: Number(x.price || 0) * Number(x.qty || 0),
-        }));
+        lines = posCartToModalLines(mapBackendItemsToCart(backendItems));
       }
 
       let total = lines.reduce((s, x) => s + x.lineTotal, 0);
@@ -1270,8 +1158,8 @@ export function TablesView({ onPosOpenChange }) {
       if (oid) {
         try {
           const pedido = await backofficeApi.getPedido(oid);
-          const m = pedido?.monto ?? pedido?.Monto ?? pedido?.total ?? pedido?.Total;
-          if (m != null && Number.isFinite(Number(m))) total = Number(m);
+          const m = getPedidoMontoNumeric(pedido);
+          if (m != null) total = m;
         } catch {
           /* ignore */
         }

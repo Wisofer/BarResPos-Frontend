@@ -60,8 +60,8 @@ export function Navbar({ onMenuClick, collapsed = false, onToggleCollapse }) {
         >
           <Menu className="h-6 w-6" />
         </button>
-        <div className="flex flex-1 justify-center lg:hidden">
-          <span className="truncate text-base font-semibold text-slate-800 dark:text-slate-100">
+        <div className="flex min-w-0 flex-1 justify-center lg:hidden">
+          <span className="truncate px-1 text-center text-sm font-semibold text-slate-800 dark:text-slate-100 sm:text-base">
             {companyName}
           </span>
         </div>
@@ -77,11 +77,11 @@ export function Navbar({ onMenuClick, collapsed = false, onToggleCollapse }) {
         </button>
       )}
       <div className="hidden lg:block flex-1" aria-hidden />
-      <div className="flex items-center gap-0.5 sm:gap-1" ref={notifRef}>
+      <div className="flex shrink-0 items-center gap-0.5 sm:gap-1" ref={notifRef}>
         <button
           type="button"
           onClick={() => update({ theme: isDark ? "light" : "dark" })}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-600 dark:text-slate-200 hover:bg-primary-50 dark:hover:bg-slate-800 hover:text-primary-700 dark:hover:text-primary-200 transition-colors"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-600 touch-manipulation transition-colors hover:bg-primary-50 dark:text-slate-200 dark:hover:bg-slate-800 hover:text-primary-700 dark:hover:text-primary-200 sm:h-10 sm:w-10"
           aria-label={isDark ? "Usar tema claro" : "Usar tema oscuro"}
           title={isDark ? "Tema claro" : "Tema oscuro"}
         >
@@ -91,7 +91,7 @@ export function Navbar({ onMenuClick, collapsed = false, onToggleCollapse }) {
           <button
             type="button"
             onClick={() => setNotifOpen((o) => !o)}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-600 dark:text-slate-200 hover:bg-primary-50 dark:hover:bg-slate-800 hover:text-primary-700 dark:hover:text-primary-200 transition-colors relative"
+            className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-600 touch-manipulation transition-colors hover:bg-primary-50 dark:text-slate-200 dark:hover:bg-slate-800 hover:text-primary-700 dark:hover:text-primary-200 sm:h-10 sm:w-10"
             aria-label="Notificaciones"
             aria-expanded={notifOpen}
           >
@@ -132,7 +132,7 @@ export function Navbar({ onMenuClick, collapsed = false, onToggleCollapse }) {
           <button
             type="button"
             onClick={() => setUserMenuOpen((o) => !o)}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-100 dark:bg-slate-800 border-2 border-primary-200 dark:border-slate-700 hover:bg-primary-200/80 dark:hover:bg-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-400 dark:focus:ring-primary-300"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-primary-200 bg-primary-100 touch-manipulation transition-colors hover:bg-primary-200/80 focus:outline-none focus:ring-2 focus:ring-primary-400 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:focus:ring-primary-300 sm:h-10 sm:w-10"
             aria-label="Ver información del usuario"
             aria-expanded={userMenuOpen}
           >

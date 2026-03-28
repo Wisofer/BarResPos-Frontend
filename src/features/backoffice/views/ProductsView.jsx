@@ -21,6 +21,7 @@ import { getApiUrl } from "../../../api/config.js";
 import { getToken } from "../../../api/token.js";
 import { ProductCategoriesView } from "./ProductCategoriesView.jsx";
 import { PROVIDERS_UPDATED_EVENT } from "../providers/constants.js";
+import { resolveProductCodigoForSave } from "../utils/productCodigo.js";
 
 /** Solo estos productos tienen movimientos de inventario en POS/backend. */
 function tieneControlStock(p) {
@@ -57,6 +58,13 @@ function formatMovementDate(m) {
     return String(raw);
   }
 }
+
+/** Campos táctiles en móvil (min 44px) y text-base para evitar zoom en iOS al enfocar. */
+const productModalFieldClass =
+  "mt-1 w-full min-h-[44px] rounded-lg border border-slate-300 px-3 py-2.5 text-base sm:min-h-0 sm:py-2 sm:text-sm";
+const productModalCodigoFieldClass = `${productModalFieldClass} placeholder:text-[10px] placeholder:leading-snug placeholder:text-slate-400 sm:placeholder:text-xs`;
+const productModalTextareaClass =
+  "mt-1 w-full min-h-[5.5rem] rounded-lg border border-slate-300 px-3 py-2.5 text-base sm:min-h-0 sm:py-2 sm:text-sm";
 
 export function ProductsView({ currencySymbol = "C$" }) {
   const snackbar = useSnackbar();
@@ -195,6 +203,14 @@ export function ProductsView({ currencySymbol = "C$" }) {
     const raw = stockModalProducts.length > 0 ? stockModalProducts : products;
     return raw.filter(tieneControlStock).length;
   }, [stockModalProducts, products]);
+
+  const peerCodigos = useCallback(
+    (excludeProductId) =>
+      products
+        .filter((p) => !excludeProductId || String(p.id) !== String(excludeProductId))
+        .map((p) => p.codigo),
+    [products]
+  );
 
   const openCreate = () => {
     setForm({
@@ -359,8 +375,9 @@ export function ProductsView({ currencySymbol = "C$" }) {
     setSaving(true);
     setError("");
     try {
+      const codigo = resolveProductCodigoForSave(form.codigo, form.nombre, peerCodigos(form.id));
       const body = {
-        codigo: form.codigo,
+        codigo,
         nombre: form.nombre,
         descripcion: form.descripcion,
         precio: Number(form.precioVenta || 0),
@@ -626,31 +643,69 @@ export function ProductsView({ currencySymbol = "C$" }) {
       </div>
       {modalOpen && (
         <BackofficeDialog
-          maxWidthClass="max-w-lg"
+          maxWidthClass="max-w-2xl"
+          panelClassName="sm:mx-auto"
           onBackdropClick={saving ? undefined : () => setModalOpen(false)}
         >
-          <form onSubmit={saveProduct} className="w-full min-w-0">
-            <h3 className="text-lg font-semibold text-slate-800">{form.id ? "Editar producto" : "Nuevo producto"}</h3>
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-              <label className="text-xs font-semibold text-slate-600">
+          <form onSubmit={saveProduct} className="flex w-full min-w-0 flex-col">
+            <h3 className="text-base font-semibold leading-tight text-slate-800 sm:text-lg">
+              {form.id ? "Editar producto" : "Nuevo producto"}
+            </h3>
+            <div className="mt-4 grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2 sm:items-start sm:gap-x-6 sm:gap-y-3">
+              <label className="min-w-0 block text-xs font-semibold text-slate-600">
                 Código
-                <input value={form.codigo} onChange={(e) => setForm((f) => ({ ...f, codigo: e.target.value }))} placeholder="Ej: REF-AGUA-001" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <input
+                  value={form.codigo}
+                  onChange={(e) => setForm((f) => ({ ...f, codigo: e.target.value }))}
+                  placeholder="Se generará automáticamente si se deja vacío"
+                  className={productModalCodigoFieldClass}
+                  autoComplete="off"
+                />
               </label>
-              <label className="text-xs font-semibold text-slate-600">
+              <label className="min-w-0 text-xs font-semibold text-slate-600">
                 Producto
-                <input value={form.nombre} onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))} placeholder="Nombre del producto" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+                <input
+                  value={form.nombre}
+                  onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))}
+                  placeholder="Nombre del producto"
+                  className={productModalFieldClass}
+                  required
+                  autoComplete="off"
+                />
               </label>
-              <label className="text-xs font-semibold text-slate-600">
+              <label className="min-w-0 text-xs font-semibold text-slate-600">
                 Precio venta
-                <input type="number" step="0.01" value={form.precioVenta} onChange={(e) => setForm((f) => ({ ...f, precioVenta: e.target.value }))} placeholder="0.00" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+                <input
+                  type="number"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={form.precioVenta}
+                  onChange={(e) => setForm((f) => ({ ...f, precioVenta: e.target.value }))}
+                  placeholder="0.00"
+                  className={productModalFieldClass}
+                  required
+                />
               </label>
-              <label className="text-xs font-semibold text-slate-600">
+              <label className="min-w-0 text-xs font-semibold text-slate-600">
                 Precio compra
-                <input type="number" step="0.01" value={form.precioCompra} onChange={(e) => setForm((f) => ({ ...f, precioCompra: e.target.value }))} placeholder="0.00" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <input
+                  type="number"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={form.precioCompra}
+                  onChange={(e) => setForm((f) => ({ ...f, precioCompra: e.target.value }))}
+                  placeholder="0.00"
+                  className={productModalFieldClass}
+                />
               </label>
-              <label className="text-xs font-semibold text-slate-600">
+              <label className="min-w-0 text-xs font-semibold text-slate-600">
                 Categoría
-                <select value={form.categoriaProductoId} onChange={(e) => setForm((f) => ({ ...f, categoriaProductoId: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required>
+                <select
+                  value={form.categoriaProductoId}
+                  onChange={(e) => setForm((f) => ({ ...f, categoriaProductoId: e.target.value }))}
+                  className={productModalFieldClass}
+                  required
+                >
                   <option value="">Selecciona categoría</option>
                   {categories.map((c) => {
                     const label = c.nombre || c.descripcion || `Categoria ${c.id}`;
@@ -664,48 +719,90 @@ export function ProductsView({ currencySymbol = "C$" }) {
                   })}
                 </select>
               </label>
-              <label className="text-xs font-semibold text-slate-600">
+              <label className="min-w-0 text-xs font-semibold text-slate-600">
                 Proveedor
-                <select value={form.proveedorId} onChange={(e) => setForm((f) => ({ ...f, proveedorId: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                <select
+                  value={form.proveedorId}
+                  onChange={(e) => setForm((f) => ({ ...f, proveedorId: e.target.value }))}
+                  className={productModalFieldClass}
+                >
                   <option value="">Sin proveedor</option>
                   {providers.map((p) => (
                     <option key={p.id} value={p.id}>{p.nombre || p.descripcion || `Proveedor ${p.id}`}</option>
                   ))}
                 </select>
               </label>
-              <label className="text-xs font-semibold text-slate-600">
+              <label className="min-w-0 text-xs font-semibold text-slate-600">
                 Stock actual
                 <input
                   type="number"
+                  inputMode="numeric"
                   value={form.stock}
                   onChange={(e) => setForm((f) => ({ ...f, stock: e.target.value }))}
                   placeholder="Stock"
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                  className={`${productModalFieldClass} disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500`}
                   disabled={Boolean(form.id)}
                   title={form.id ? "El stock se ajusta solo desde movimientos de inventario." : undefined}
                 />
-                {form.id && <p className="mt-1 text-[11px] font-normal text-slate-500">El stock se ajusta desde Entrada/Salida/Ajuste.</p>}
+                {form.id && <p className="mt-1 text-[11px] text-slate-500">El stock se ajusta desde Entrada/Salida/Ajuste.</p>}
               </label>
-              <label className="text-xs font-semibold text-slate-600">
+              <label className="min-w-0 text-xs font-semibold text-slate-600">
                 Stock mínimo
-                <input type="number" value={form.stockMinimo} onChange={(e) => setForm((f) => ({ ...f, stockMinimo: e.target.value }))} placeholder="0" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={form.stockMinimo}
+                  onChange={(e) => setForm((f) => ({ ...f, stockMinimo: e.target.value }))}
+                  placeholder="0"
+                  className={productModalFieldClass}
+                />
               </label>
-              <label className="inline-flex items-center gap-2 pt-1 text-sm text-slate-700">
-                <input type="checkbox" checked={form.controlarStock} onChange={(e) => setForm((f) => ({ ...f, controlarStock: e.target.checked }))} />
-                Controlar stock
-              </label>
-              <label className="inline-flex items-center gap-2 pt-1 text-sm text-slate-700">
-                <input type="checkbox" checked={form.activo} onChange={(e) => setForm((f) => ({ ...f, activo: e.target.checked }))} />
-                Activo
-              </label>
+              <div className="col-span-full grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 sm:col-span-2">
+                <label className="flex min-h-[44px] items-center gap-3 text-sm text-slate-700 sm:min-h-0">
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5 shrink-0 rounded border-slate-300 sm:h-4 sm:w-4"
+                    checked={form.controlarStock}
+                    onChange={(e) => setForm((f) => ({ ...f, controlarStock: e.target.checked }))}
+                  />
+                  Controlar stock
+                </label>
+                <label className="flex min-h-[44px] items-center gap-3 text-sm text-slate-700 sm:min-h-0">
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5 shrink-0 rounded border-slate-300 sm:h-4 sm:w-4"
+                    checked={form.activo}
+                    onChange={(e) => setForm((f) => ({ ...f, activo: e.target.checked }))}
+                  />
+                  Activo
+                </label>
+              </div>
             </div>
-            <label className="mt-3 block text-xs font-semibold text-slate-600">
+            <label className="mt-4 block min-w-0 text-xs font-semibold text-slate-600 sm:mt-3">
               Descripción
-              <textarea value={form.descripcion} onChange={(e) => setForm((f) => ({ ...f, descripcion: e.target.value }))} placeholder="Información adicional del producto" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" rows={3} />
+              <textarea
+                value={form.descripcion}
+                onChange={(e) => setForm((f) => ({ ...f, descripcion: e.target.value }))}
+                placeholder="Información adicional del producto"
+                className={productModalTextareaClass}
+                rows={3}
+              />
             </label>
-            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button type="button" onClick={() => setModalOpen(false)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 sm:w-auto">Cancelar</button>
-              <button disabled={saving} className="w-full rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50 sm:w-auto">{saving ? "Guardando..." : "Guardar"}</button>
+            <div className="mt-6 flex flex-col-reverse gap-3 border-t border-slate-100 pt-4 sm:mt-5 sm:flex-row sm:justify-end sm:border-0 sm:pt-0">
+              <button
+                type="button"
+                onClick={() => setModalOpen(false)}
+                className="min-h-12 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 touch-manipulation sm:min-h-0 sm:w-auto sm:py-2 sm:text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="min-h-12 w-full rounded-lg bg-primary-600 px-4 py-3 text-sm font-semibold text-white touch-manipulation disabled:opacity-50 sm:min-h-0 sm:w-auto sm:py-2 sm:text-xs"
+              >
+                {saving ? "Guardando..." : "Guardar"}
+              </button>
             </div>
           </form>
         </BackofficeDialog>

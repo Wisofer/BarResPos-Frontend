@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, Package, UserCircle } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useSnackbar } from "../contexts/SnackbarContext.jsx";
-import { MobileNav, SidebarNav } from "../features/backoffice/components";
+import { BackofficeShellHeaderActions, MobileNav, SidebarNav } from "../features/backoffice/components";
 import { NAV_ITEMS } from "../features/backoffice/constants.js";
 import { backofficeApi } from "../features/backoffice/services/backofficeApi.js";
 import { resolveCurrencySymbol } from "../features/backoffice/utils/currency.js";
@@ -78,19 +77,13 @@ export function AuthHome() {
   const { user, logout, sessionLoading } = useAuth();
   const snackbar = useSnackbar();
   const lowStockSigRef = useRef(null);
-  const notifWrapRef = useRef(null);
-  const profileWrapRef = useRef(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeView, setActiveView] = useState("dashboard");
   const [currencySymbol, setCurrencySymbol] = useState("C$");
   const [lowStockItems, setLowStockItems] = useState([]);
-  const [notifOpen, setNotifOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
   const allowedViewIds = useMemo(() => getAllowedViewIds(user), [user]);
   const navItems = useMemo(() => NAV_ITEMS.filter((item) => allowedViewIds.includes(item.id)), [allowedViewIds]);
-
-  const lowStockCount = lowStockItems.length;
 
   useEffect(() => {
     const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
@@ -190,18 +183,6 @@ export function AuthHome() {
     };
   }, [refreshLowStock]);
 
-  useEffect(() => {
-    const onPointerDown = (e) => {
-      const t = e.target;
-      if (notifWrapRef.current?.contains(t)) return;
-      if (profileWrapRef.current?.contains(t)) return;
-      setNotifOpen(false);
-      setProfileOpen(false);
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, []);
-
   const ActiveView = useMemo(() => {
     if (activeView === "products") return ProductsView;
     if (activeView === "providers") return ProvidersView;
@@ -227,6 +208,18 @@ export function AuthHome() {
         onLogout={logout}
         sessionLoading={sessionLoading}
         navItems={navItems}
+        topBarEnd={
+          <BackofficeShellHeaderActions
+            variant="topbar"
+            user={user}
+            logout={logout}
+            sessionLoading={sessionLoading}
+            lowStockItems={lowStockItems}
+            refreshLowStock={refreshLowStock}
+            openView={openView}
+            allowedViewIds={allowedViewIds}
+          />
+        }
       />
 
       <div
@@ -246,149 +239,25 @@ export function AuthHome() {
 
         <section className="space-y-6 pb-24 lg:pb-0 lg:pr-2">
           {showViewHeader && (
-            <header className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <h1 className="text-2xl font-bold text-slate-800">
+            <header className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-xl font-bold leading-tight text-slate-800 sm:text-2xl">
                     {TITLES[activeView] || `Hola ${displayUserName(user) || "equipo"} 👋`}
                   </h1>
-                  <p className="mt-1 text-sm text-slate-500">Vista modular con estructura limpia por carpetas.</p>
+                  <p className="mt-1 text-xs text-slate-500 sm:text-sm">Vista modular con estructura limpia por carpetas.</p>
                 </div>
-                <div className="flex flex-wrap items-center gap-0.5 sm:gap-1">
-                  <div ref={notifWrapRef} className="relative">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNotifOpen((o) => !o);
-                        setProfileOpen(false);
-                        void refreshLowStock();
-                      }}
-                      className="relative rounded-full p-2.5 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-                      aria-label="Notificaciones"
-                    >
-                      <Bell className="h-5 w-5" strokeWidth={1.75} />
-                      {lowStockCount > 0 && (
-                        <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-0.5 text-[9px] font-bold leading-none text-white">
-                          {lowStockCount > 9 ? "9+" : lowStockCount}
-                        </span>
-                      )}
-                    </button>
-                    {notifOpen && (
-                      <div
-                        className="absolute right-0 top-[calc(100%+0.35rem)] z-50 w-[min(100vw-2rem,22rem)] overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-xl shadow-slate-200/60"
-                        role="dialog"
-                        aria-label="Notificaciones"
-                      >
-                        <div className="border-b border-slate-100 px-4 py-3">
-                          <h2 className="text-base font-bold text-slate-900">Notificaciones</h2>
-                          <p className="mt-0.5 text-sm text-slate-500">
-                            {lowStockCount === 0
-                              ? "Sin alertas de inventario"
-                              : `${lowStockCount} ${lowStockCount === 1 ? "alerta" : "alertas"} de stock bajo`}
-                          </p>
-                        </div>
-                        <div className="max-h-72 overflow-y-auto py-2">
-                          {lowStockCount === 0 ? (
-                            <p className="px-4 py-6 text-center text-sm text-slate-500">Todo en orden por ahora.</p>
-                          ) : (
-                            <ul className="divide-y divide-slate-50">
-                              {lowStockItems.map((p, idx) => (
-                                <li
-                                  key={p.id != null ? String(p.id) : `stock-${idx}-${p.nombre}`}
-                                  className="flex gap-3 px-3 py-2.5 transition hover:bg-slate-50"
-                                >
-                                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-50 text-sky-600">
-                                    <Package className="h-5 w-5" strokeWidth={1.75} />
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <p className="truncate text-sm font-semibold text-slate-900">{p.nombre}</p>
-                                    <p className="mt-0.5 text-xs text-slate-500">
-                                      Stock bajo · {p.stock} / {p.stockMinimo} mín.
-                                    </p>
-                                  </div>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                        {lowStockCount > 0 && allowedViewIds.includes("products") && (
-                          <div className="border-t border-slate-100 px-3 py-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                openView("products");
-                                setNotifOpen(false);
-                              }}
-                              className="w-full rounded-lg py-2 text-center text-sm font-semibold text-primary-600 hover:bg-primary-50"
-                            >
-                              Ver productos
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <div ref={profileWrapRef} className="relative">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProfileOpen((o) => !o);
-                        setNotifOpen(false);
-                      }}
-                      className="rounded-full p-2.5 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-                      aria-label="Perfil"
-                      title="Perfil"
-                    >
-                      <UserCircle className="h-6 w-6" strokeWidth={1.75} />
-                    </button>
-                    {profileOpen && (
-                      <div
-                        className="absolute right-0 top-[calc(100%+0.35rem)] z-50 w-[min(100vw-2rem,19rem)] overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-xl shadow-slate-200/60"
-                        role="dialog"
-                        aria-label="Perfil de usuario"
-                      >
-                        <div className="flex gap-3 border-b border-slate-100 p-4">
-                          <div
-                            className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700"
-                            aria-hidden
-                          >
-                            <UserCircle className="h-9 w-9" strokeWidth={1.5} />
-                          </div>
-                          <div className="min-w-0 flex-1 pt-0.5">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sesión</p>
-                            <p className="mt-1 truncate text-base font-bold text-slate-900">{displayUserName(user)}</p>
-                            {user?.nombreCompleto &&
-                              user?.nombreUsuario &&
-                              String(user.nombreCompleto).trim() !== String(user.nombreUsuario).trim() && (
-                                <p className="mt-0.5 truncate text-xs text-slate-500">@{user.nombreUsuario}</p>
-                              )}
-                            {user?.rol != null && user.rol !== "" && (
-                              <p className="mt-1 text-xs text-slate-600">
-                                Rol: <span className="font-medium text-slate-800">{user.rol}</span>
-                              </p>
-                            )}
-                            {user?.email != null && user.email !== "" && (
-                              <p className="mt-1 break-all text-xs text-slate-500">{user.email}</p>
-                            )}
-                            {user?.id != null && <p className="mt-1 text-xs text-slate-400">ID: {user.id}</p>}
-                          </div>
-                        </div>
-                        <div className="p-3">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setProfileOpen(false);
-                              void logout();
-                            }}
-                            disabled={sessionLoading}
-                            className="w-full rounded-lg border border-slate-200 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
-                          >
-                            {sessionLoading ? "Cerrando…" : "Cerrar sesión"}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                <div className="hidden shrink-0 lg:block">
+                  <BackofficeShellHeaderActions
+                    variant="card"
+                    user={user}
+                    logout={logout}
+                    sessionLoading={sessionLoading}
+                    lowStockItems={lowStockItems}
+                    refreshLowStock={refreshLowStock}
+                    openView={openView}
+                    allowedViewIds={allowedViewIds}
+                  />
                 </div>
               </div>
             </header>
