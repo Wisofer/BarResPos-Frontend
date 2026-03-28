@@ -89,9 +89,19 @@ async function request(path, options = {}, retryOnUnauthorized = true) {
     let errMsg = text;
     try {
       const data = JSON.parse(text);
-      errMsg = data.error || data.message || text;
+      errMsg =
+        data.message ||
+        data.Message ||
+        data.error ||
+        data.Error ||
+        data.title ||
+        data.Title ||
+        (typeof data.errors === "string" ? data.errors : null) ||
+        text;
     } catch (_) {}
-    throw new Error(errMsg);
+    const err = new Error(typeof errMsg === "string" && errMsg.trim() ? errMsg.trim() : `Error HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
   }
   if (res.status === 204) return null;
   const json = await res.json();

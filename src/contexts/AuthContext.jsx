@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect } from "rea
 import { authApi } from "../api/auth.js";
 import { setOnUnauthorized } from "../api/client.js";
 import { getToken, setToken, setRefreshToken, getRefreshToken, clearToken } from "../api/token.js";
+import { normalizeAuthUser } from "../utils/authUser.js";
 
 const AuthContext = createContext(null);
 const STATIC_USER_KEY = "barrest-static-user";
@@ -27,9 +28,11 @@ export function AuthProvider({ children }) {
 
   const checkAuth = useCallback(async () => {
     if (isStaticMode) {
-      setUser(getStoredStaticUser());
+      const raw = getStoredStaticUser();
+      const normalized = raw ? normalizeAuthUser(raw) || raw : null;
+      setUser(normalized);
       setLoading(false);
-      return getStoredStaticUser();
+      return normalized;
     }
 
     const token = getToken();
@@ -40,9 +43,10 @@ export function AuthProvider({ children }) {
     }
     try {
       const data = await authApi.me();
-      if (data?.id || data?.nombreUsuario) {
-        setUser(data);
-        return data;
+      const normalized = normalizeAuthUser(data);
+      if (normalized) {
+        setUser(normalized);
+        return normalized;
       }
       setUser(null);
       return null;
@@ -69,11 +73,11 @@ export function AuthProvider({ children }) {
       if (isStaticMode) {
         const normalizedName = nombreUsuario?.trim();
         if (!normalizedName || !contrasena) throw new Error("Ingresa usuario y contraseña.");
-        const staticUser = {
+        const staticUser = normalizeAuthUser({
           id: 1,
           nombreUsuario: normalizedName,
           rol: "admin",
-        };
+        });
         setStoredStaticUser(staticUser);
         setUser(staticUser);
         return { user: staticUser };
@@ -82,8 +86,16 @@ export function AuthProvider({ children }) {
       const data = await authApi.login(nombreUsuario, contrasena);
       if (data?.accessToken) setToken(data.accessToken);
       if (data?.refreshToken) setRefreshToken(data.refreshToken);
-      if (data?.user) setUser(data.user);
-      else if (data?.id || data?.nombreUsuario) setUser(data);
+      let normalized = normalizeAuthUser(data);
+      if (!normalized) {
+        try {
+          const me = await authApi.me();
+          normalized = normalizeAuthUser(me);
+        } catch {
+          normalized = null;
+        }
+      }
+      if (normalized) setUser(normalized);
       return data;
     } catch (e) {
       // Fallback automatico para demos estaticas sin backend disponible.
@@ -91,11 +103,11 @@ export function AuthProvider({ children }) {
       if (msg.includes("fetch") || msg.includes("Failed") || msg.includes("Connection") || msg.includes("Network")) {
         const normalizedName = nombreUsuario?.trim();
         if (normalizedName && contrasena) {
-          const staticUser = {
+          const staticUser = normalizeAuthUser({
             id: 1,
             nombreUsuario: normalizedName,
             rol: "admin",
-          };
+          });
           setStoredStaticUser(staticUser);
           setUser(staticUser);
           return { user: staticUser };

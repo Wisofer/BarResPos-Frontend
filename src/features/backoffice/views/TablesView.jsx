@@ -42,7 +42,11 @@ export function TablesView({ onPosOpenChange }) {
   const [posMobileTab, setPosMobileTab] = useState("products");
   const [activeTableMenu, setActiveTableMenu] = useState(null);
   const posOrderIdRef = useRef(posOrderId);
-  const posDeltaSyncBusyRef = useRef(false);
+  /** Cola: cada POST /pos/ordenes se procesa en orden (evita perder clics y desajuste stock/UI). */
+  const posSyncChainRef = useRef(Promise.resolve());
+  const posSyncPendingCountRef = useRef(0);
+  const posCartRef = useRef([]);
+  const [posSyncIdleTick, setPosSyncIdleTick] = useState(0);
   const [form, setForm] = useState({
     id: null,
     numero: "",
@@ -328,6 +332,8 @@ export function TablesView({ onPosOpenChange }) {
       snackbar.info("Caja cerrada: no se puede abrir POS en mesas.");
       return;
     }
+    posSyncChainRef.current = Promise.resolve();
+    posSyncPendingCountRef.current = 0;
     setPosOpen(true);
     setPosTable(table);
     setActiveTableMenu(null);
@@ -396,68 +402,87 @@ export function TablesView({ onPosOpenChange }) {
     });
   }, [posProducts, posCategory, posSearch]);
 
-  const syncPosDeltaAdd = async (product, cantidad = 1) => {
+  const rollbackPosLineQty = (productId, cantidad) => {
+    setPosCart((prev) => {
+      const next = [...prev];
+      const idx = next.findIndex((x) => x.id === productId);
+      if (idx < 0) return prev;
+      const currentQty = Number(next[idx].qty || 0);
+      const newQty = Math.max(0, currentQty - Number(cantidad || 1));
+      if (newQty <= 0) next.splice(idx, 1);
+      else next[idx] = { ...next[idx], qty: newQty };
+      return next;
+    });
+  };
+
+  const syncPosDeltaAdd = (product, cantidad = 1) => {
     if (!posTable) return;
     if (!cajaAbierta) return;
     if (posActionBusy) return;
-    if (posDeltaSyncBusyRef.current) return;
-    posDeltaSyncBusyRef.current = true;
-    try {
-      const currentId = posOrderIdRef.current;
-      const body = {
-        mesaId: Number(posTable.id),
-        ordenId: currentId ?? undefined,
-        observaciones: "",
-        productos: [{ productoId: Number(product.id), cantidad, notas: "" }],
-      };
-      const data = await backofficeApi.posOrdenes(body);
-      const newOrderId =
-        data?.id ??
-        data?.Id ??
-        data?.ordenId ??
-        data?.OrdenId ??
-        data?.pedidoId ??
-        data?.PedidoId ??
-        data?.facturaId ??
-        data?.FacturaId ??
-        currentId ??
-        null;
 
-      if (newOrderId && newOrderId !== posOrderIdRef.current) {
-        setPosOrderId(newOrderId);
-      }
+    posSyncPendingCountRef.current += 1;
+    posSyncChainRef.current = posSyncChainRef.current
+      .then(async () => {
+        const currentId = posOrderIdRef.current;
+        const body = {
+          mesaId: Number(posTable.id),
+          ordenId: currentId ?? undefined,
+          observaciones: "",
+          productos: [{ productoId: Number(product.id), cantidad, notas: "" }],
+        };
+        try {
+          const data = await backofficeApi.posOrdenes(body);
+          const newOrderId =
+            data?.id ??
+            data?.Id ??
+            data?.ordenId ??
+            data?.OrdenId ??
+            data?.pedidoId ??
+            data?.PedidoId ??
+            data?.facturaId ??
+            data?.FacturaId ??
+            currentId ??
+            null;
 
-      // Ya existe en backend el delta del carrito.
-      setPosCommitted(true);
-      await loadTables(); // refresca la ocupación real de la mesa
-    } catch (e) {
-      const msg = e?.message || "No se pudo agregar el producto en backend.";
-      if (String(msg).includes("409") || msg.toLowerCase().includes("caja")) {
-        setCajaAbierta(false);
-      }
-      const normalized = String(msg)
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/\p{Diacritic}/gu, "");
-      if (normalized.includes("caja") && normalized.includes("cerrada")) {
-        await syncCajaEstado();
-        // Revierte el alta optimista si backend no permitió agregar por caja cerrada.
-        setPosCart((prev) => {
-          const next = [...prev];
-          const idx = next.findIndex((x) => x.id === product.id);
-          if (idx < 0) return prev;
-          const currentQty = Number(next[idx].qty || 0);
-          const newQty = Math.max(0, currentQty - Number(cantidad || 1));
-          if (newQty <= 0) next.splice(idx, 1);
-          else next[idx] = { ...next[idx], qty: newQty };
-          return next;
-        });
-      }
-      setError(msg);
-      snackbar.error(msg);
-    } finally {
-      posDeltaSyncBusyRef.current = false;
-    }
+          if (newOrderId && newOrderId !== posOrderIdRef.current) {
+            setPosOrderId(newOrderId);
+          }
+
+          setPosCommitted(true);
+          await loadTables();
+        } catch (e) {
+          rollbackPosLineQty(product.id, cantidad);
+          const msg = e?.message || "No se pudo agregar el producto en backend.";
+          const status = e?.status;
+          const normalized = String(msg)
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/\p{Diacritic}/gu, "");
+          const cajaCerrada = normalized.includes("caja") && normalized.includes("cerrada");
+          if (cajaCerrada) {
+            setCajaAbierta(false);
+            await syncCajaEstado();
+          }
+          const stockConflict =
+            status === 409 &&
+            !cajaCerrada &&
+            (normalized.includes("stock") ||
+              normalized.includes("inventario") ||
+              normalized.includes("insuficiente") ||
+              (normalized.includes("disponible") && normalized.includes("solicit")));
+          snackbar.error(stockConflict && !/^stock\b/i.test(msg) ? `Stock: ${msg}` : msg);
+          setError(msg);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        posSyncPendingCountRef.current = Math.max(0, posSyncPendingCountRef.current - 1);
+        if (posSyncPendingCountRef.current === 0) {
+          setPosSyncIdleTick((n) => n + 1);
+        }
+      });
+
+    void posSyncChainRef.current;
   };
 
   const addProductToCart = async (product) => {
@@ -504,12 +529,16 @@ export function TablesView({ onPosOpenChange }) {
   }, [posOrderId]);
 
   useEffect(() => {
+    posCartRef.current = posCart;
+  }, [posCart]);
+
+  useEffect(() => {
     // Si el usuario deja el carrito vacío, liberamos la mesa cancelando la orden activa en backend.
     if (!posOpen || !posTable) return;
     if (!posOrderId) return;
     if (posCart.length !== 0) return;
     if (posActionBusy) return;
-    if (posDeltaSyncBusyRef.current) return;
+    if (posSyncPendingCountRef.current > 0) return;
 
     const cancelWhenEmpty = async () => {
       try {
@@ -530,9 +559,11 @@ export function TablesView({ onPosOpenChange }) {
 
     cancelWhenEmpty();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posCart.length, posOrderId, posOpen, posTable]);
+  }, [posCart.length, posOrderId, posOpen, posTable, posActionBusy, posSyncIdleTick]);
 
   const closePosView = () => {
+    posSyncChainRef.current = Promise.resolve();
+    posSyncPendingCountRef.current = 0;
     setPosOpen(false);
     setPosTable(null);
     setPosOrderId(null);
@@ -726,6 +757,8 @@ export function TablesView({ onPosOpenChange }) {
     if (posCart.length === 0) return posOrderId;
     if (posActionBusy) return posOrderId;
 
+    await posSyncChainRef.current.catch(() => {});
+
     setPosActionBusy(true);
     setError("");
     try {
@@ -790,8 +823,29 @@ export function TablesView({ onPosOpenChange }) {
       return currentId;
     } catch (e) {
       const msg = e?.message || "No se pudo enviar la orden.";
+      const status = e?.status;
+      const normalized = String(msg)
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, "");
+      const stockConflict =
+        status === 409 &&
+        (normalized.includes("stock") ||
+          normalized.includes("inventario") ||
+          normalized.includes("insuficiente") ||
+          (normalized.includes("disponible") && normalized.includes("solicit")));
+      if (status === 409 && posTable) {
+        try {
+          const freshRaw = await backofficeApi.getMesaOrdenActiva(posTable.id);
+          const fresh = freshRaw?.data ?? freshRaw?.Data ?? freshRaw;
+          const backendItems = fresh?.items ?? fresh?.Items;
+          if (backendItems) setPosCart(mapBackendItemsToCart(backendItems));
+        } catch {
+          /* ignore */
+        }
+      }
       setError(msg);
-      snackbar.error(msg);
+      snackbar.error(stockConflict && !/^stock\b/i.test(msg) ? `Stock: ${msg}` : msg);
       throw e;
     } finally {
       setPosActionBusy(false);
@@ -825,7 +879,7 @@ export function TablesView({ onPosOpenChange }) {
     if (!posTable) return;
     if (posActionBusy) return;
     try {
-      if (!posCommitted && posCart.length > 0) await ensurePosOrderSynced();
+      if (posCart.length > 0) await ensurePosOrderSynced();
       if (!posOrderId) throw new Error("No hay orden activa para enviar a cocina.");
 
       // Si la orden ya existía (posCart vacío), cargamos items para mantener UI sincronizada.
@@ -865,7 +919,7 @@ export function TablesView({ onPosOpenChange }) {
     if (posActionBusy || saleProcessing) return;
     setError("");
     try {
-      if (!posCommitted && posCart.length > 0) await ensurePosOrderSynced();
+      if (posCart.length > 0) await ensurePosOrderSynced();
 
       let ordenId = posOrderId ?? posOrderIdRef.current;
       let lines = posCart.map((x) => ({
@@ -984,6 +1038,7 @@ export function TablesView({ onPosOpenChange }) {
       }
 
       snackbar.success("Venta procesada.");
+      window.dispatchEvent(new CustomEvent("barrest-inventory-updated"));
       setSaleModalOpen(false);
       setSaleOrdenId(null);
       setSaleModalLines([]);
@@ -1004,7 +1059,7 @@ export function TablesView({ onPosOpenChange }) {
     if (posActionBusy || saleProcessing) return;
     setError("");
     try {
-      if (!posCommitted && posCart.length > 0) await ensurePosOrderSynced();
+      if (posCart.length > 0) await ensurePosOrderSynced();
       let ordenId = posOrderId ?? posOrderIdRef.current;
 
       if (!ordenId) {

@@ -169,6 +169,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
       await loadProducts(selectedCategory);
       setStockModalOpen(false);
       snackbar.success("Movimiento de inventario aplicado.");
+      window.dispatchEvent(new CustomEvent("barrest-inventory-updated"));
     } catch (e2) {
       setError(e2.message || "No se pudo aplicar el movimiento.");
       snackbar.error(e2.message || "No se pudo aplicar el movimiento.");
@@ -334,6 +335,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
       await loadProducts(selectedCategory);
       setModalOpen(false);
       snackbar.success(form.id ? "Producto actualizado." : "Producto creado.");
+      window.dispatchEvent(new CustomEvent("barrest-inventory-updated"));
     } catch (e2) {
       setError(e2.message || "No se pudo guardar el producto.");
       snackbar.error(e2.message || "No se pudo guardar el producto.");
@@ -349,6 +351,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
       await backofficeApi.deleteProducto(id);
       await loadProducts(selectedCategory);
       snackbar.success("Producto eliminado/desactivado.");
+      window.dispatchEvent(new CustomEvent("barrest-inventory-updated"));
     } catch (e) {
       setError(e.message || "No se pudo eliminar el producto.");
       snackbar.error(e.message || "No se pudo eliminar el producto.");
