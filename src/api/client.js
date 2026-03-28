@@ -57,7 +57,7 @@ async function runRefreshTokenFlow() {
   }
 }
 
-async function request(path, options = {}, retryOnUnauthorized = true) {
+async function request(path, options = {}, retryOnUnauthorized = true, withEnvelope = false) {
   const url = `${getApiUrl()}${path.startsWith("/") ? path : `/${path}`}`;
   const headers = {
     "Content-Type": "application/json",
@@ -78,7 +78,7 @@ async function request(path, options = {}, retryOnUnauthorized = true) {
   if (res.status === 401) {
     if (retryOnUnauthorized && !isAuthPublicRequest(path)) {
       const newAccessToken = await runRefreshTokenFlow();
-      if (newAccessToken) return request(path, options, false);
+      if (newAccessToken) return request(path, options, false, withEnvelope);
     }
     clearToken();
     onUnauthorized();
@@ -105,6 +105,14 @@ async function request(path, options = {}, retryOnUnauthorized = true) {
   }
   if (res.status === 204) return null;
   const json = await res.json();
+  if (withEnvelope) {
+    const message =
+      json && typeof json === "object"
+        ? json.message || json.Message || ""
+        : "";
+    const data = unwrapApiResponse(json);
+    return { data, message: typeof message === "string" ? message : String(message || "") };
+  }
   return unwrapApiResponse(json);
 }
 
@@ -113,5 +121,6 @@ export const api = {
   post: (path, body) => request(path, { method: "POST", body }),
   put: (path, body) => request(path, { method: "PUT", body }),
   patch: (path, body) => request(path, { method: "PATCH", body }),
+  patchWithEnvelope: (path, body) => request(path, { method: "PATCH", body }, true, true),
   delete: (path) => request(path, { method: "DELETE" }),
 };

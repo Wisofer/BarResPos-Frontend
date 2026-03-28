@@ -29,6 +29,9 @@ export const backofficeApi = {
   pedidoPrecuenta: (id) => api.get(`/api/v1/pedidos/${id}/precuenta`),
   pedidoPrecuentaHtml: (id) => api.get(`/api/v1/pedidos/${id}/precuenta/html`),
   patchPedidoEstado: (id, estado) => api.patch(`/api/v1/pedidos/${id}/estado`, { estado }),
+  /** Asigna el pedido a otra mesa (trasladar pedido, no la mesa). Opcional; si no existe, el front usa PUT pedido. */
+  pedidoTrasladarMesa: (pedidoId, mesaIdDestino) =>
+    api.patchWithEnvelope(`/api/v1/pedidos/${pedidoId}/mesa`, { mesaId: mesaIdDestino }),
   updatePedido: (id, body) => api.put(`/api/v1/pedidos/${id}`, body),
   listProductos: (params) => api.get(`/api/v1/productos${qs(params)}`),
   getProducto: (id) => api.get(`/api/v1/productos/${id}`),

@@ -1,10 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ChefHat, Lock, Minus, MoreVertical, Pencil, Plus, Printer, Save, Trash2, XCircle } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRightLeft,
+  ChefHat,
+  Lock,
+  Minus,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Printer,
+  Save,
+  Trash2,
+  XCircle,
+} from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { BackofficeDialog, ListSkeleton, PosProcesarVentaModal, StatCardsSkeleton } from "../components/index.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
 import { formatCurrency } from "../utils/currency.js";
+import { buildUpdatePedidoPayloadForMesaChange } from "../utils/pedidoMesa.js";
 import { isAdminUser } from "../utils/auth.js";
 import { useAuth } from "../../../contexts/AuthContext.jsx";
 import { getToken } from "../../../api/token.js";
@@ -67,6 +81,9 @@ export function TablesView({ onPosOpenChange }) {
   const [confirmDeleteLocation, setConfirmDeleteLocation] = useState({ open: false, id: null, name: "" });
   const [showInactiveLocations, setShowInactiveLocations] = useState(false);
   const [cajaAbierta, setCajaAbierta] = useState(true);
+  const [moveOrderOpen, setMoveOrderOpen] = useState(false);
+  const [moveOrderTargetId, setMoveOrderTargetId] = useState("");
+  const [moveOrderCandidates, setMoveOrderCandidates] = useState([]);
   const isAdmin = isAdminUser(user);
 
   const syncCajaEstado = async () => {
@@ -88,7 +105,7 @@ export function TablesView({ onPosOpenChange }) {
   });
 
   const mapTable = (m, i) => ({
-    id: m.id,
+    id: m.id ?? m.Id,
     displayId: m.numero || m.codigo || `M-${String(i + 1).padStart(2, "0")}`,
     capacity: m.capacidad || 4,
     zone: m.ubicacion?.nombre || m.ubicacion || "Salon",
@@ -627,6 +644,125 @@ export function TablesView({ onPosOpenChange }) {
         };
       })
       .filter((x) => x.qty > 0);
+  };
+
+  const openMoveOrderDialog = async () => {
+    if (!posTable) return;
+    const oid = posOrderId ?? posOrderIdRef.current;
+    if (!oid) {
+      snackbar.info("No hay un pedido activo para trasladar.");
+      return;
+    }
+    setError("");
+    if (posCart.length > 0) {
+      try {
+        await ensurePosOrderSynced();
+      } catch {
+        return;
+      }
+    }
+    try {
+      const data = await backofficeApi.listMesas({ page: 1, pageSize: 100 });
+      const raw = data?.items || [];
+      const mapped = raw.map(mapTable);
+      const free = mapped.filter((t) => t.id !== posTable.id && t.status === "Libre");
+      if (free.length === 0) {
+        snackbar.info("No hay mesas libres. Libera una mesa o elige otra estrategia.");
+        return;
+      }
+      setMoveOrderCandidates(free);
+      setMoveOrderTargetId(String(free[0].id));
+      setMoveOrderOpen(true);
+    } catch (e) {
+      const msg = e?.message || "No se pudo cargar mesas para el traslado.";
+      snackbar.error(msg);
+      setError(msg);
+    }
+  };
+
+  const handleConfirmTrasladarPedido = async (e) => {
+    e.preventDefault();
+    if (!posTable) return;
+    const destId = Number(moveOrderTargetId);
+    const oid = posOrderId ?? posOrderIdRef.current;
+    if (!oid || !Number.isFinite(destId) || destId === posTable.id) {
+      snackbar.error("Selecciona una mesa destino válida.");
+      return;
+    }
+
+    setPosActionBusy(true);
+    setError("");
+    try {
+      if (posCart.length > 0) {
+        await ensurePosOrderSynced();
+      }
+
+      const orderId = posOrderId ?? posOrderIdRef.current;
+      if (!orderId) throw new Error("No se encontró el pedido activo.");
+
+      let trasladarMessage = "";
+      try {
+        const env = await backofficeApi.pedidoTrasladarMesa(orderId, destId);
+        trasladarMessage = (env?.message || "").trim();
+      } catch (err) {
+        const st = err?.status;
+        if (st !== 404 && st !== 405) throw err;
+        const pedido = await backofficeApi.getPedido(orderId);
+        const body = buildUpdatePedidoPayloadForMesaChange(pedido, destId);
+        await backofficeApi.updatePedido(orderId, body);
+      }
+
+      const [, mesaRes, rawOrden] = await Promise.all([
+        loadTables(),
+        backofficeApi.getMesa(destId).catch(() => null),
+        backofficeApi.getMesaOrdenActiva(destId).catch(() => null),
+      ]);
+
+      let newTable;
+      if (mesaRes) {
+        newTable = mapTable(mesaRes, 0);
+      } else {
+        const fromList = moveOrderCandidates.find((t) => t.id === destId);
+        if (!fromList) throw new Error("No se pudo cargar la mesa destino.");
+        newTable = fromList;
+      }
+
+      const orderActive = rawOrden?.data ?? rawOrden?.Data ?? rawOrden;
+      const nextId = orderActive?.id ?? orderActive?.Id ?? orderActive?.ordenId ?? orderActive?.pedidoId ?? orderId;
+      const backendItems = orderActive?.items ?? orderActive?.Items;
+      let nextCart = posCartRef.current;
+      if (backendItems?.length) {
+        nextCart = mapBackendItemsToCart(backendItems);
+      } else {
+        try {
+          const p = await backofficeApi.getPedido(nextId ?? orderId);
+          const its = p?.items ?? p?.Items;
+          if (its?.length) nextCart = mapBackendItemsToCart(its);
+        } catch {
+          /* mantiene carrito actual */
+        }
+      }
+
+      // Un solo bloque de estado: evita un frame con mesa nueva y carrito/pedido desalineados
+      // (el efecto de carrito vacío podía dispararse mal en ese intervalo).
+      setPosTable(newTable);
+      setPosOrderId(nextId);
+      setPosCart(nextCart);
+      setPosMobileTab("order");
+      setPosCommitted(true);
+      setMoveOrderOpen(false);
+      setMoveOrderCandidates([]);
+      setMoveOrderTargetId("");
+      snackbar.success(
+        trasladarMessage || `Pedido trasladado a ${newTable.zone} · ${newTable.displayId}.`
+      );
+    } catch (err) {
+      const msg = err?.message || "No se pudo trasladar el pedido.";
+      setError(msg);
+      snackbar.error(msg);
+    } finally {
+      setPosActionBusy(false);
+    }
   };
 
   const openPreCuentaPrint = ({ mesaLabel, zoneLabel, lines, total, currency }) => {
@@ -1192,14 +1328,27 @@ export function TablesView({ onPosOpenChange }) {
               </h2>
               <p className="text-xs text-slate-500">Selecciona productos para esta mesa.</p>
             </div>
-            <button
-              type="button"
-              onClick={closePosView}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Volver a mesas
-            </button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {posOrderId && (
+                <button
+                  type="button"
+                  onClick={() => void openMoveOrderDialog()}
+                  disabled={posActionBusy}
+                  className="inline-flex items-center gap-1 rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-900 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <ArrowRightLeft className="h-3.5 w-3.5 shrink-0" />
+                  Trasladar pedido
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={closePosView}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Volver a mesas
+              </button>
+            </div>
           </div>
 
           <div className="mb-3 overflow-x-auto rounded-md border border-slate-200 bg-white p-2">
@@ -1330,6 +1479,17 @@ export function TablesView({ onPosOpenChange }) {
                       <div className="flex justify-between"><span>Total</span><span className="font-bold">{formatCurrency(posSubtotal, "C$")}</span></div>
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-1.5 border-t border-slate-200 pt-2">
+                      {posOrderId && (
+                        <button
+                          type="button"
+                          onClick={() => void openMoveOrderDialog()}
+                          disabled={posActionBusy}
+                          className="col-span-2 inline-flex items-center justify-center gap-1 rounded-sm border border-violet-300 bg-violet-50 px-2 py-2 text-[11px] font-semibold text-violet-900 disabled:opacity-60"
+                        >
+                          <ArrowRightLeft className="h-3.5 w-3.5 shrink-0" />
+                          Trasladar pedido
+                        </button>
+                      )}
                       <button type="button" onClick={handleCancelarPos} disabled={posActionBusy} className="inline-flex items-center justify-center gap-1 rounded-sm bg-red-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
                         <XCircle className="h-3.5 w-3.5" />
                         Cancelar
@@ -1352,6 +1512,15 @@ export function TablesView({ onPosOpenChange }) {
 
                 {(posCart.length === 0 && posOrderId) && (
                   <div className="mt-3 grid grid-cols-2 gap-1.5 border-t border-slate-200 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => void openMoveOrderDialog()}
+                      disabled={posActionBusy}
+                      className="col-span-2 inline-flex items-center justify-center gap-1 rounded-sm border border-violet-300 bg-violet-50 px-2 py-2 text-[11px] font-semibold text-violet-900 disabled:opacity-60"
+                    >
+                      <ArrowRightLeft className="h-3.5 w-3.5 shrink-0" />
+                      Trasladar pedido
+                    </button>
                     <button type="button" onClick={handleCancelarPos} disabled={posActionBusy} className="inline-flex items-center justify-center gap-1 rounded-sm bg-red-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
                       <XCircle className="h-3.5 w-3.5" />
                       Cancelar
@@ -1469,6 +1638,17 @@ export function TablesView({ onPosOpenChange }) {
 
               {(posCart.length > 0 || posOrderId) && (
                 <div className="mt-3 flex flex-wrap items-center justify-end gap-1.5 border-t border-slate-200 pt-2">
+                  {posOrderId && (
+                    <button
+                      type="button"
+                      onClick={() => void openMoveOrderDialog()}
+                      disabled={posActionBusy}
+                      className="inline-flex items-center gap-1 rounded-sm border border-violet-300 bg-violet-50 px-3 py-1.5 text-[11px] font-semibold text-violet-900 disabled:opacity-60"
+                    >
+                      <ArrowRightLeft className="h-3.5 w-3.5 shrink-0" />
+                      Trasladar pedido
+                    </button>
+                  )}
                   <button type="button" onClick={handleCancelarPos} disabled={posActionBusy} className="inline-flex items-center gap-1 rounded-sm bg-red-500 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60">
                     <XCircle className="h-3.5 w-3.5" />
                     Cancelar
@@ -1529,6 +1709,52 @@ export function TablesView({ onPosOpenChange }) {
           busy={saleProcessing}
           onGuardar={handleGuardarVenta}
         />
+
+        {moveOrderOpen && posTable && (
+          <BackofficeDialog
+            maxWidthClass="max-w-md"
+            onBackdropClick={posActionBusy ? undefined : () => setMoveOrderOpen(false)}
+          >
+            <form onSubmit={handleConfirmTrasladarPedido} className="w-full min-w-0">
+              <h3 className="text-lg font-semibold text-slate-800">Trasladar pedido a otra mesa</h3>
+              <label className="mt-4 block text-xs font-semibold text-slate-600">
+                Mesa destino (solo libres)
+                <select
+                  value={moveOrderTargetId}
+                  onChange={(e) => setMoveOrderTargetId(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  required
+                >
+                  {moveOrderCandidates.map((t) => (
+                    <option key={t.id} value={String(t.id)}>
+                      {t.zone} · {t.displayId} (cap. {t.capacity})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoveOrderOpen(false);
+                    setMoveOrderCandidates([]);
+                  }}
+                  disabled={posActionBusy}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:w-auto"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={posActionBusy || moveOrderCandidates.length === 0}
+                  className="w-full rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50 sm:w-auto"
+                >
+                  {posActionBusy ? "Trasladando pedido…" : "Confirmar traslado del pedido"}
+                </button>
+              </div>
+            </form>
+          </BackofficeDialog>
+        )}
       </>
     );
   }
