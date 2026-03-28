@@ -27,7 +27,7 @@ export function isMeseroUser(user) {
 
 export function getAllowedViewIds(user) {
   if (isAdminUser(user)) {
-    return ["dashboard", "orders", "tables", "products", "kitchen", "cashier", "users", "settings", "reports"];
+    return ["dashboard", "orders", "tables", "products", "providers", "kitchen", "cashier", "users", "settings", "reports"];
   }
   if (isMeseroUser(user)) {
     return ["dashboard", "tables", "orders"];

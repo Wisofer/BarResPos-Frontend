@@ -2,6 +2,14 @@ import { useEffect, useState } from "react";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { ListSkeleton } from "../components/index.js";
 import { formatCurrency } from "../utils/currency.js";
+import {
+  cierreDetalleDiferencia,
+  cierreDetalleMontoEsperado,
+  cierreDetalleMontoReal,
+  cierreFechaRaw,
+  cierreHistorialMontoPrincipal,
+  cierreId,
+} from "../utils/caja.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 
 export function CashierView({ currencySymbol = "C$" }) {
@@ -30,9 +38,10 @@ export function CashierView({ currencySymbol = "C$" }) {
     ]);
     setEstado(e || null);
     setPreview(prev || null);
-    setHistorial(Array.isArray(hist?.items) ? hist.items : Array.isArray(hist) ? hist : []);
-    setHistorialPage(hist?.page || page);
-    setHistorialTotalPages(hist?.totalPages || 1);
+    const rawItems = hist?.items ?? hist?.Items;
+    setHistorial(Array.isArray(rawItems) ? rawItems : Array.isArray(hist) ? hist : []);
+    setHistorialPage(hist?.page ?? hist?.Page ?? page);
+    setHistorialTotalPages(hist?.totalPages ?? hist?.TotalPages ?? 1);
     if ((e?.abierta || e?.estado === "Abierto") && showApertura) setShowApertura(false);
   };
 
@@ -335,23 +344,30 @@ export function CashierView({ currencySymbol = "C$" }) {
                   <p className="text-sm text-slate-500">Sin cierres registrados.</p>
                 ) : (
                   <div className="space-y-2">
-                    {historial.map((item, i) => (
-                      <div key={item.id || i} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                        <div>
-                          <p className="font-medium text-slate-800">Cierre #{item.id || i + 1}</p>
-                          <p className="text-xs text-slate-500">{String(item.fechaCierre || item.fecha || "").slice(0, 19)}</p>
+                    {historial.map((item, i) => {
+                      const cid = cierreId(item) ?? i + 1;
+                      return (
+                        <div key={cid} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                          <div>
+                            <p className="font-medium text-slate-800">Cierre #{cid}</p>
+                            <p className="text-xs text-slate-500">{String(cierreFechaRaw(item)).slice(0, 19)}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-slate-800">
+                              {formatCurrency(cierreHistorialMontoPrincipal(item), currencySymbol)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => loadDetalleCierre(cierreId(item))}
+                              disabled={cierreId(item) == null}
+                              className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                            >
+                              Detalle
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-slate-800">{formatCurrency(item.montoReal ?? item.total ?? 0, currencySymbol)}</span>
-                          <button
-                            onClick={() => loadDetalleCierre(item.id)}
-                            className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                          >
-                            Detalle
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </>
@@ -366,15 +382,15 @@ export function CashierView({ currencySymbol = "C$" }) {
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div className="rounded-lg bg-slate-50 p-3">
               <p className="text-xs text-slate-500">Monto esperado</p>
-              <p className="text-lg font-bold text-slate-800">{formatCurrency(cierreDetalle?.montoEsperado ?? 0, currencySymbol)}</p>
+              <p className="text-lg font-bold text-slate-800">{formatCurrency(cierreDetalleMontoEsperado(cierreDetalle), currencySymbol)}</p>
             </div>
             <div className="rounded-lg bg-slate-50 p-3">
               <p className="text-xs text-slate-500">Monto real</p>
-              <p className="text-lg font-bold text-slate-800">{formatCurrency(cierreDetalle?.montoReal ?? 0, currencySymbol)}</p>
+              <p className="text-lg font-bold text-slate-800">{formatCurrency(cierreDetalleMontoReal(cierreDetalle), currencySymbol)}</p>
             </div>
             <div className="rounded-lg bg-slate-50 p-3">
               <p className="text-xs text-slate-500">Diferencia</p>
-              <p className="text-lg font-bold text-slate-800">{formatCurrency(cierreDetalle?.diferencia ?? 0, currencySymbol)}</p>
+              <p className="text-lg font-bold text-slate-800">{formatCurrency(cierreDetalleDiferencia(cierreDetalle), currencySymbol)}</p>
             </div>
           </div>
         </article>

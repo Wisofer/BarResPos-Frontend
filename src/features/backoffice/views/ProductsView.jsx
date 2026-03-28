@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, Pencil, Plus, Trash2, TriangleAlert } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Download, Pencil, Plus, Search, Trash2, TriangleAlert } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { ListSkeleton, StatCardsSkeleton } from "../components/index.js";
 import { formatCurrency } from "../utils/currency.js";
@@ -8,6 +8,43 @@ import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
 import { getApiUrl } from "../../../api/config.js";
 import { getToken } from "../../../api/token.js";
 import { ProductCategoriesView } from "./ProductCategoriesView.jsx";
+import { PROVIDERS_UPDATED_EVENT } from "../providers/constants.js";
+
+/** Solo estos productos tienen movimientos de inventario en POS/backend. */
+function tieneControlStock(p) {
+  return Boolean(p?.controlarStock ?? p?.ControlarStock);
+}
+
+function movementProductId(m) {
+  return m?.productoId ?? m?.ProductoId ?? m?.producto?.id ?? m?.Producto?.Id ?? null;
+}
+
+function movementProductLabel(m, productList) {
+  const fromApi =
+    m?.productoNombre ??
+    m?.ProductoNombre ??
+    m?.nombreProducto ??
+    m?.NombreProducto ??
+    m?.producto?.nombre ??
+    m?.Producto?.Nombre;
+  if (fromApi) return String(fromApi);
+  const id = movementProductId(m);
+  const p = productList.find((x) => String(x.id) === String(id));
+  if (p?.nombre) return p.nombre;
+  return id != null ? `Producto #${id}` : "—";
+}
+
+function formatMovementDate(m) {
+  const raw = m?.fecha ?? m?.Fecha ?? m?.fechaCreacion ?? m?.FechaCreacion ?? m?.createdAt ?? m?.CreatedAt;
+  if (raw == null || raw === "") return null;
+  try {
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return String(raw);
+    return d.toLocaleString("es-NI", { dateStyle: "short", timeStyle: "short" });
+  } catch {
+    return String(raw);
+  }
+}
 
 export function ProductsView({ currencySymbol = "C$" }) {
   const snackbar = useSnackbar();
@@ -25,8 +62,8 @@ export function ProductsView({ currencySymbol = "C$" }) {
   const [movementModalOpen, setMovementModalOpen] = useState(false);
   const [productHistoryModalOpen, setProductHistoryModalOpen] = useState(false);
   const [categoriesScreen, setCategoriesScreen] = useState(false);
-  const [providersModalOpen, setProvidersModalOpen] = useState(false);
   const [movementRows, setMovementRows] = useState([]);
+  const [movementProductLookup, setMovementProductLookup] = useState([]);
   const [historyRows, setHistoryRows] = useState([]);
   const [selectedProductName, setSelectedProductName] = useState("");
   const [form, setForm] = useState({
@@ -53,17 +90,12 @@ export function ProductsView({ currencySymbol = "C$" }) {
     cantidadNueva: "",
     observaciones: "",
   });
-  const [providerForm, setProviderForm] = useState({
-    id: null,
-    nombre: "",
-    telefono: "",
-    email: "",
-    direccion: "",
-    contacto: "",
-    observaciones: "",
-    activo: true,
-  });
   const [confirmAction, setConfirmAction] = useState({ open: false, type: "", id: null, name: "" });
+  const [stockModalProducts, setStockModalProducts] = useState([]);
+  const [stockProductQuery, setStockProductQuery] = useState("");
+  const [stockModalLoading, setStockModalLoading] = useState(false);
+  const [stockSuggestOpen, setStockSuggestOpen] = useState(false);
+  const stockSuggestBlurTimerRef = useRef(null);
 
   const loadProducts = async (categoriaId = selectedCategory) => {
     const data = await backofficeApi.listProductos({
@@ -91,6 +123,19 @@ export function ProductsView({ currencySymbol = "C$" }) {
     };
   }, []);
 
+  useEffect(() => {
+    const onProvidersUpdated = async () => {
+      try {
+        const prov = await backofficeApi.catalogoProveedores();
+        setProviders(Array.isArray(prov) ? prov : prov?.items || []);
+      } catch {
+        /* silencioso: el usuario puede recargar la vista */
+      }
+    };
+    window.addEventListener(PROVIDERS_UPDATED_EVENT, onProvidersUpdated);
+    return () => window.removeEventListener(PROVIDERS_UPDATED_EVENT, onProvidersUpdated);
+  }, []);
+
   const reloadCategoriesOnly = useCallback(async () => {
     try {
       const cat = await backofficeApi.catalogoCategoriasProducto();
@@ -104,6 +149,40 @@ export function ProductsView({ currencySymbol = "C$" }) {
     if (!selectedCategory) return products;
     return products.filter((p) => String(p.categoriaProductoId || "") === String(selectedCategory));
   }, [products, selectedCategory]);
+
+  const stockAutocompleteList = useMemo(() => {
+    const raw = stockModalProducts.length > 0 ? stockModalProducts : products;
+    const list = raw.filter(tieneControlStock);
+    const q = stockProductQuery.trim().toLowerCase();
+    if (!q) return [];
+    return list
+      .filter((p) => {
+        const hay = `${p.nombre || ""} ${p.codigo || ""} ${p.categoria || ""}`.toLowerCase();
+        return hay.includes(q);
+      })
+      .slice(0, 10);
+  }, [stockModalProducts, products, stockProductQuery]);
+
+  useEffect(() => {
+    if (!stockModalOpen) {
+      setStockSuggestOpen(false);
+      if (stockSuggestBlurTimerRef.current) {
+        window.clearTimeout(stockSuggestBlurTimerRef.current);
+        stockSuggestBlurTimerRef.current = null;
+      }
+    }
+  }, [stockModalOpen]);
+
+  const selectedStockProduct = useMemo(() => {
+    const raw = stockModalProducts.length > 0 ? stockModalProducts : products;
+    const list = raw.filter(tieneControlStock);
+    return list.find((p) => String(p.id) === String(stockForm.productoId));
+  }, [stockModalProducts, products, stockForm.productoId]);
+
+  const stockModalProductCount = useMemo(() => {
+    const raw = stockModalProducts.length > 0 ? stockModalProducts : products;
+    return raw.filter(tieneControlStock).length;
+  }, [stockModalProducts, products]);
 
   const openCreate = () => {
     setForm({
@@ -123,23 +202,43 @@ export function ProductsView({ currencySymbol = "C$" }) {
     setModalOpen(true);
   };
 
-  const openStockModal = (mode) => {
+  const openStockModal = async (mode) => {
     setStockMode(mode);
+    setStockProductQuery("");
+    setStockSuggestOpen(false);
     setStockForm({
-      productoId: filteredProducts[0]?.id || "",
+      productoId: "",
       cantidad: "",
       costoUnitario: "",
-      proveedorId: providers[0]?.id || "",
+      proveedorId: providers[0]?.id != null ? String(providers[0].id) : "",
       numeroFactura: "",
       subtipo: "Daño",
       cantidadNueva: "",
       observaciones: "",
     });
     setStockModalOpen(true);
+    setStockModalLoading(true);
+    try {
+      const data = await backofficeApi.listProductos({ page: 1, pageSize: 500, activos: true });
+      const items = Array.isArray(data?.items) ? data.items : [];
+      setStockModalProducts(items.filter(tieneControlStock));
+    } catch {
+      setStockModalProducts(products.filter(tieneControlStock));
+    } finally {
+      setStockModalLoading(false);
+    }
   };
 
   const submitStockAction = async (e) => {
     e.preventDefault();
+    if (!stockForm.productoId) {
+      snackbar.error("Selecciona un producto.");
+      return;
+    }
+    if (!selectedStockProduct) {
+      snackbar.error("Ese producto no tiene control de stock activo o no está en el catálogo.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -182,8 +281,12 @@ export function ProductsView({ currencySymbol = "C$" }) {
     setSaving(true);
     setError("");
     try {
-      const data = await backofficeApi.movimientosProductos({ page: 1, pageSize: 100 });
-      setMovementRows(Array.isArray(data?.items) ? data.items : []);
+      const [movRes, prodRes] = await Promise.all([
+        backofficeApi.movimientosProductos({ page: 1, pageSize: 200 }),
+        backofficeApi.listProductos({ page: 1, pageSize: 500, activos: true }).catch(() => ({ items: [] })),
+      ]);
+      setMovementRows(Array.isArray(movRes?.items) ? movRes.items : []);
+      setMovementProductLookup(Array.isArray(prodRes?.items) ? prodRes.items : []);
       setMovementModalOpen(true);
     } catch (e) {
       setError(e.message || "No se pudo cargar movimientos.");
@@ -210,78 +313,6 @@ export function ProductsView({ currencySymbol = "C$" }) {
   const categoriaRequiereCocina = (c) => {
     const v = c?.requiereCocina ?? c?.RequiereCocina;
     return v !== false;
-  };
-
-  const openProvidersModal = () => {
-    setProviderForm({ id: null, nombre: "", telefono: "", email: "", direccion: "", contacto: "", observaciones: "", activo: true });
-    setProvidersModalOpen(true);
-  };
-
-  const editProvider = async (id) => {
-    setSaving(true);
-    setError("");
-    try {
-      const p = await backofficeApi.getProveedor(id);
-      setProviderForm({
-        id: p.id,
-        nombre: p.nombre || "",
-        telefono: p.telefono || "",
-        email: p.email || "",
-        direccion: p.direccion || "",
-        contacto: p.contacto || "",
-        observaciones: p.observaciones || "",
-        activo: p.activo !== false,
-      });
-      setProvidersModalOpen(true);
-    } catch (e) {
-      setError(e.message || "No se pudo cargar proveedor.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveProvider = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    setError("");
-    try {
-      const body = {
-        nombre: providerForm.nombre,
-        telefono: providerForm.telefono || null,
-        email: providerForm.email || null,
-        direccion: providerForm.direccion || null,
-        contacto: providerForm.contacto || null,
-        observaciones: providerForm.observaciones || null,
-        activo: Boolean(providerForm.activo),
-      };
-      if (providerForm.id) await backofficeApi.updateProveedor(providerForm.id, body);
-      else await backofficeApi.createProveedor(body);
-      const prov = await backofficeApi.catalogoProveedores();
-      setProviders(Array.isArray(prov) ? prov : prov?.items || []);
-      setProviderForm({ id: null, nombre: "", telefono: "", email: "", direccion: "", contacto: "", observaciones: "", activo: true });
-      snackbar.success("Proveedor guardado.");
-    } catch (e2) {
-      setError(e2.message || "No se pudo guardar proveedor.");
-      snackbar.error(e2.message || "No se pudo guardar proveedor.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const removeProvider = async (id) => {
-    setSaving(true);
-    setError("");
-    try {
-      await backofficeApi.deleteProveedor(id);
-      const prov = await backofficeApi.catalogoProveedores();
-      setProviders(Array.isArray(prov) ? prov : prov?.items || []);
-      snackbar.success("Proveedor desactivado.");
-    } catch (e) {
-      setError(e.message || "No se pudo eliminar proveedor.");
-      snackbar.error(e.message || "No se pudo eliminar proveedor.");
-    } finally {
-      setSaving(false);
-    }
   };
 
   const openEdit = async (id) => {
@@ -473,16 +504,15 @@ export function ProductsView({ currencySymbol = "C$" }) {
 
         <div className="mt-2 overflow-x-auto">
           <div className="flex w-max min-w-full flex-wrap gap-2 md:w-auto md:min-w-0">
-          <button onClick={() => openStockModal("entrada")} className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700">Entrada Stock</button>
-          <button onClick={() => openStockModal("salida")} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700">Salida Stock</button>
-          <button onClick={() => openStockModal("ajuste")} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700">Ajuste Stock</button>
+          <button type="button" onClick={() => void openStockModal("entrada")} className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700">Entrada Stock</button>
+          <button type="button" onClick={() => void openStockModal("salida")} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700">Salida Stock</button>
+          <button type="button" onClick={() => void openStockModal("ajuste")} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700">Ajuste Stock</button>
           <button onClick={openGlobalMovements} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700">Ver Movimientos</button>
           <button onClick={exportProductsExcel} disabled={saving} className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
             <Download className="h-3.5 w-3.5" />
             Exportar Excel
           </button>
           <button type="button" onClick={() => setCategoriesScreen(true)} className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-700">Categorías</button>
-          <button onClick={openProvidersModal} className="rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-700">Proveedores</button>
         </div>
         </div>
       </div>
@@ -632,44 +662,194 @@ export function ProductsView({ currencySymbol = "C$" }) {
             <h3 className="text-lg font-semibold text-slate-800">
               {stockMode === "entrada" ? "Entrada de stock" : stockMode === "salida" ? "Salida de stock" : "Ajuste de stock"}
             </h3>
-            <div className="mt-4 grid grid-cols-1 gap-3">
-              <select value={stockForm.productoId} onChange={(e) => setStockForm((f) => ({ ...f, productoId: e.target.value }))} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" required>
-                <option value="">Producto</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>{p.nombre}</option>
-                ))}
-              </select>
+
+            <label className="mt-4 block text-xs font-semibold text-slate-600">
+              Buscar producto
+              <span className="ml-1 font-normal text-slate-400">(solo con control de stock)</span>
+              <div className="relative mt-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  autoComplete="off"
+                  value={stockProductQuery}
+                  onChange={(e) => {
+                    setStockProductQuery(e.target.value);
+                    setStockForm((f) => ({ ...f, productoId: "" }));
+                    setStockSuggestOpen(true);
+                  }}
+                  onFocus={() => {
+                    if (stockSuggestBlurTimerRef.current) {
+                      window.clearTimeout(stockSuggestBlurTimerRef.current);
+                      stockSuggestBlurTimerRef.current = null;
+                    }
+                    setStockSuggestOpen(true);
+                  }}
+                  onBlur={() => {
+                    stockSuggestBlurTimerRef.current = window.setTimeout(() => {
+                      setStockSuggestOpen(false);
+                      stockSuggestBlurTimerRef.current = null;
+                    }, 200);
+                  }}
+                  placeholder="Nombre o código…"
+                  className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm"
+                />
+                {stockSuggestOpen && stockProductQuery.trim().length > 0 && (
+                  <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-hidden rounded-lg border border-slate-300 bg-white shadow-md">
+                    {stockModalLoading ? (
+                      <p className="px-3 py-2 text-sm text-slate-500">Cargando…</p>
+                    ) : stockAutocompleteList.length === 0 ? (
+                      <p className="px-3 py-2 text-sm text-slate-500">Sin coincidencias.</p>
+                    ) : (
+                      <ul className="max-h-44 overflow-y-auto divide-y divide-slate-100">
+                        {stockAutocompleteList.map((p) => (
+                          <li key={p.id}>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                setStockForm((f) => ({ ...f, productoId: String(p.id) }));
+                                setStockProductQuery(p.nombre || "");
+                                setStockSuggestOpen(false);
+                              }}
+                              className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                            >
+                              <span className="font-medium text-slate-800">{p.nombre}</span>
+                              <span className="block text-xs text-slate-500">
+                                {p.codigo ? `${p.codigo} · ` : ""}Stock {p.stock ?? 0}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
+              {stockModalLoading && stockProductQuery.trim().length === 0 && (
+                <p className="mt-1 text-[11px] text-slate-500">Cargando catálogo…</p>
+              )}
+              {!stockModalLoading && stockModalProductCount === 0 && (
+                <p className="mt-2 text-xs text-amber-700">No hay productos con control de stock activo.</p>
+              )}
+              {stockForm.productoId && selectedStockProduct && (
+                <p className="mt-1 text-xs text-slate-500">
+                  Seleccionado · stock {selectedStockProduct.stock ?? 0}
+                  {selectedStockProduct.codigo ? ` · ${selectedStockProduct.codigo}` : ""}
+                </p>
+              )}
+            </label>
+
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
               {stockMode !== "ajuste" && (
-                <input type="number" min="1" value={stockForm.cantidad} onChange={(e) => setStockForm((f) => ({ ...f, cantidad: e.target.value }))} placeholder="Cantidad" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+                <label className="text-xs font-semibold text-slate-600">
+                  Cantidad
+                  <input
+                    type="number"
+                    min="1"
+                    value={stockForm.cantidad}
+                    onChange={(e) => setStockForm((f) => ({ ...f, cantidad: e.target.value }))}
+                    placeholder="Unidades"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    required
+                  />
+                </label>
               )}
+
+              {stockMode === "entrada" && (
+                <label className="text-xs font-semibold text-slate-600">
+                  Costo unitario ({currencySymbol})
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={stockForm.costoUnitario}
+                    onChange={(e) => setStockForm((f) => ({ ...f, costoUnitario: e.target.value }))}
+                    placeholder="0.00"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+              )}
+
+              {stockMode === "salida" && (
+                <label className="text-xs font-semibold text-slate-600">
+                  Motivo
+                  <select
+                    value={stockForm.subtipo}
+                    onChange={(e) => setStockForm((f) => ({ ...f, subtipo: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    required
+                  >
+                    <option>Daño</option>
+                    <option>Merma</option>
+                    <option>Transferencia</option>
+                    <option>Ajuste</option>
+                  </select>
+                </label>
+              )}
+
               {stockMode === "ajuste" && (
-                <input type="number" min="0" value={stockForm.cantidadNueva} onChange={(e) => setStockForm((f) => ({ ...f, cantidadNueva: e.target.value }))} placeholder="Cantidad nueva" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
+                <label className="text-xs font-semibold text-slate-600 md:col-span-2">
+                  Nueva cantidad en inventario
+                  <input
+                    type="number"
+                    min="0"
+                    value={stockForm.cantidadNueva}
+                    onChange={(e) => setStockForm((f) => ({ ...f, cantidadNueva: e.target.value }))}
+                    placeholder="Cantidad física"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    required
+                  />
+                </label>
               )}
+
               {stockMode === "entrada" && (
                 <>
-                  <input type="number" min="0" step="0.01" value={stockForm.costoUnitario} onChange={(e) => setStockForm((f) => ({ ...f, costoUnitario: e.target.value }))} placeholder="Costo unitario" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                  <select value={stockForm.proveedorId} onChange={(e) => setStockForm((f) => ({ ...f, proveedorId: e.target.value }))} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                    <option value="">Proveedor</option>
-                    {providers.map((p) => (
-                      <option key={p.id} value={p.id}>{p.nombre || p.razonSocial || `Proveedor ${p.id}`}</option>
-                    ))}
-                  </select>
-                  <input value={stockForm.numeroFactura} onChange={(e) => setStockForm((f) => ({ ...f, numeroFactura: e.target.value }))} placeholder="Numero factura" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <label className="text-xs font-semibold text-slate-600">
+                    Proveedor
+                    <select
+                      value={stockForm.proveedorId}
+                      onChange={(e) => setStockForm((f) => ({ ...f, proveedorId: e.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    >
+                      <option value="">Sin proveedor</option>
+                      {providers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.nombre || p.razonSocial || `Proveedor ${p.id}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold text-slate-600">
+                    Número de factura
+                    <input
+                      value={stockForm.numeroFactura}
+                      onChange={(e) => setStockForm((f) => ({ ...f, numeroFactura: e.target.value }))}
+                      placeholder="Opcional"
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
                 </>
               )}
-              {stockMode === "salida" && (
-                <select value={stockForm.subtipo} onChange={(e) => setStockForm((f) => ({ ...f, subtipo: e.target.value }))} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" required>
-                  <option>Daño</option>
-                  <option>Merma</option>
-                  <option>Transferencia</option>
-                  <option>Ajuste</option>
-                </select>
-              )}
-              <textarea value={stockForm.observaciones} onChange={(e) => setStockForm((f) => ({ ...f, observaciones: e.target.value }))} placeholder="Observaciones" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" rows={3} />
+
+              <label className="text-xs font-semibold text-slate-600 md:col-span-2">
+                Observaciones
+                <textarea
+                  value={stockForm.observaciones}
+                  onChange={(e) => setStockForm((f) => ({ ...f, observaciones: e.target.value }))}
+                  placeholder="Opcional"
+                  rows={3}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
             </div>
+
             <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={() => setStockModalOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Cancelar</button>
-              <button disabled={saving} className="rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white">{saving ? "Procesando..." : "Guardar"}</button>
+              <button type="button" onClick={() => setStockModalOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">
+                Cancelar
+              </button>
+              <button type="submit" disabled={saving || stockModalLoading} className="rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
+                {saving ? "Guardando..." : "Guardar"}
+              </button>
             </div>
           </form>
         </div>
@@ -679,16 +859,57 @@ export function ProductsView({ currencySymbol = "C$" }) {
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-3 sm:items-center sm:p-4">
           <div className="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl max-h-[92vh] overflow-y-auto">
             <h3 className="text-lg font-semibold text-slate-800">Movimientos globales</h3>
-            <div className="mt-4 max-h-[60vh] space-y-2 overflow-auto">
-              {movementRows.length === 0 && <p className="text-sm text-slate-500">Sin movimientos.</p>}
-              {movementRows.map((m, i) => (
-                <div key={m.id || i} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                  {m.tipo || "Movimiento"} | Producto: {m.productoNombre || m.productoId} | Cantidad: {m.cantidad} | Stock: {m.stockAnterior} → {m.stockNuevo}
-                </div>
-              ))}
+            <p className="mt-1 text-xs text-slate-500">Últimos registros (hasta 200). El nombre sale del catálogo si el API solo manda el id.</p>
+            <div className="mt-3 max-h-[60vh] overflow-auto rounded-lg border border-slate-200">
+              {movementRows.length === 0 && <p className="p-4 text-sm text-slate-500">Sin movimientos.</p>}
+              {movementRows.length > 0 && (
+                <table className="w-full min-w-[520px] text-left text-sm">
+                  <thead className="sticky top-0 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="border-b border-slate-200 px-3 py-2">Producto</th>
+                      <th className="border-b border-slate-200 px-3 py-2">Tipo</th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-right">Cantidad</th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-right">Stock</th>
+                      <th className="border-b border-slate-200 px-3 py-2">Fecha</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {movementRows.map((m, i) => {
+                      const tipo = m.tipo ?? m.Tipo ?? "Movimiento";
+                      const sub = m.subtipo ?? m.Subtipo;
+                      const cant = m.cantidad ?? m.Cantidad;
+                      const ant = m.stockAnterior ?? m.StockAnterior;
+                      const nue = m.stockNuevo ?? m.StockNuevo;
+                      const pid = movementProductId(m);
+                      const name = movementProductLabel(m, movementProductLookup.length > 0 ? movementProductLookup : products);
+                      const fecha = formatMovementDate(m);
+                      const isEntrada = String(tipo).toLowerCase().includes("entrada");
+                      return (
+                        <tr key={m.id ?? m.Id ?? i} className="hover:bg-slate-50/80">
+                          <td className="px-3 py-2">
+                            <span className="font-medium text-slate-900">{name}</span>
+                            {pid != null && <span className="ml-1 text-xs text-slate-400">#{pid}</span>}
+                          </td>
+                          <td className="px-3 py-2">
+                            <span className={isEntrada ? "font-medium text-emerald-700" : "font-medium text-red-700"}>{tipo}</span>
+                            {sub && sub !== "-" ? <span className="block text-xs font-normal text-slate-500">{sub}</span> : null}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-slate-800">{cant}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                            {ant} → {nue}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">{fecha ?? "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
             <div className="mt-4 flex justify-end">
-              <button onClick={() => setMovementModalOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Cerrar</button>
+              <button type="button" onClick={() => setMovementModalOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">
+                Cerrar
+              </button>
             </div>
           </div>
         </div>
@@ -698,54 +919,48 @@ export function ProductsView({ currencySymbol = "C$" }) {
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-3 sm:items-center sm:p-4">
           <div className="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl max-h-[92vh] overflow-y-auto">
             <h3 className="text-lg font-semibold text-slate-800">Historial: {selectedProductName}</h3>
-            <div className="mt-4 max-h-[60vh] space-y-2 overflow-auto">
-              {historyRows.length === 0 && <p className="text-sm text-slate-500">Sin movimientos para este producto.</p>}
-              {historyRows.map((m, i) => (
-                <div key={m.id || i} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                  {m.tipo || "Movimiento"} | {m.subtipo || "-"} | Cantidad: {m.cantidad} | Stock: {m.stockAnterior} → {m.stockNuevo}
-                </div>
-              ))}
+            <div className="mt-3 max-h-[60vh] overflow-auto rounded-lg border border-slate-200">
+              {historyRows.length === 0 && <p className="p-4 text-sm text-slate-500">Sin movimientos para este producto.</p>}
+              {historyRows.length > 0 && (
+                <table className="w-full text-left text-sm">
+                  <thead className="sticky top-0 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="border-b border-slate-200 px-3 py-2">Tipo</th>
+                      <th className="border-b border-slate-200 px-3 py-2">Detalle</th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-right">Cantidad</th>
+                      <th className="border-b border-slate-200 px-3 py-2 text-right">Stock</th>
+                      <th className="border-b border-slate-200 px-3 py-2">Fecha</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {historyRows.map((m, i) => {
+                      const tipo = m.tipo ?? m.Tipo ?? "Movimiento";
+                      const sub = m.subtipo ?? m.Subtipo;
+                      const cant = m.cantidad ?? m.Cantidad;
+                      const ant = m.stockAnterior ?? m.StockAnterior;
+                      const nue = m.stockNuevo ?? m.StockNuevo;
+                      const fecha = formatMovementDate(m);
+                      const isEntrada = String(tipo).toLowerCase().includes("entrada");
+                      return (
+                        <tr key={m.id ?? m.Id ?? i} className="hover:bg-slate-50/80">
+                          <td className="px-3 py-2">
+                            <span className={isEntrada ? "font-medium text-emerald-700" : "font-medium text-red-700"}>{tipo}</span>
+                          </td>
+                          <td className="px-3 py-2 text-slate-600">{sub && sub !== "-" ? sub : "—"}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{cant}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                            {ant} → {nue}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">{fecha ?? "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
             <div className="mt-4 flex justify-end">
               <button onClick={() => setProductHistoryModalOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Cerrar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {providersModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-3 sm:items-center sm:p-4">
-          <div className="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl max-h-[92vh] overflow-y-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">Proveedores</h3>
-              <button onClick={() => setProvidersModalOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Cerrar</button>
-            </div>
-            <form onSubmit={saveProvider} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-              <input value={providerForm.nombre} onChange={(e) => setProviderForm((f) => ({ ...f, nombre: e.target.value }))} placeholder="Nombre" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-              <input value={providerForm.contacto} onChange={(e) => setProviderForm((f) => ({ ...f, contacto: e.target.value }))} placeholder="Contacto" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-              <input value={providerForm.telefono} onChange={(e) => setProviderForm((f) => ({ ...f, telefono: e.target.value }))} placeholder="Telefono" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-              <input type="email" value={providerForm.email} onChange={(e) => setProviderForm((f) => ({ ...f, email: e.target.value }))} placeholder="Email" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-              <input value={providerForm.direccion} onChange={(e) => setProviderForm((f) => ({ ...f, direccion: e.target.value }))} placeholder="Direccion" className="rounded-lg border border-slate-300 px-3 py-2 text-sm md:col-span-2" />
-              <textarea value={providerForm.observaciones} onChange={(e) => setProviderForm((f) => ({ ...f, observaciones: e.target.value }))} placeholder="Observaciones" className="rounded-lg border border-slate-300 px-3 py-2 text-sm md:col-span-2" rows={2} />
-              <label className="inline-flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={providerForm.activo} onChange={(e) => setProviderForm((f) => ({ ...f, activo: e.target.checked }))} /> Activo</label>
-              <div className="md:col-span-2 flex justify-end gap-2">
-                <button type="button" onClick={() => setProviderForm({ id: null, nombre: "", telefono: "", email: "", direccion: "", contacto: "", observaciones: "", activo: true })} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Limpiar</button>
-                <button disabled={saving} className="rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white">{saving ? "Guardando..." : "Guardar proveedor"}</button>
-              </div>
-            </form>
-            <div className="mt-4 max-h-[45vh] space-y-2 overflow-auto">
-              {providers.map((p) => (
-                <div key={p.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">{p.nombre}</p>
-                    <p className="text-xs text-slate-500">{p.telefono || "-"} | {p.email || "-"}</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => editProvider(p.id)} className="rounded-md bg-blue-500 px-2 py-1 text-[11px] font-semibold text-white">Editar</button>
-                    <button onClick={() => setConfirmAction({ open: true, type: "provider", id: p.id, name: p.nombre || "Proveedor" })} className="rounded-md bg-red-500 px-2 py-1 text-[11px] font-semibold text-white">Eliminar</button>
-                  </div>
-                </div>
-              ))}
             </div>
           </div>
         </div>
@@ -755,15 +970,12 @@ export function ProductsView({ currencySymbol = "C$" }) {
         onClose={() => setConfirmAction({ open: false, type: "", id: null, name: "" })}
         onConfirm={async () => {
           if (confirmAction.type === "product" && confirmAction.id) await removeProduct(confirmAction.id, confirmAction.name);
-          if (confirmAction.type === "provider" && confirmAction.id) await removeProvider(confirmAction.id);
         }}
         title="Confirmar eliminación"
         message={
           confirmAction.type === "product"
             ? `¿Eliminar producto "${confirmAction.name}"?`
-            : confirmAction.type === "provider"
-              ? "¿Desactivar proveedor?"
-              : "¿Confirmas esta acción?"
+            : "¿Confirmas esta acción?"
         }
         confirmLabel="Eliminar"
         variant="danger"

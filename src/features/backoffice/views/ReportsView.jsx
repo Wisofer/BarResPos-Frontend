@@ -3,6 +3,12 @@ import { getApiUrl } from "../../../api/config.js";
 import { getToken } from "../../../api/token.js";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { formatCurrency } from "../utils/currency.js";
+import {
+  cierreFechaRaw,
+  cierreHistorialMontoPrincipal,
+  cierreHistorialTotalVentas,
+  cierreId,
+} from "../utils/caja.js";
 import { BarChart3, Boxes, CircleDollarSign, Tags, Users } from "lucide-react";
 
 const reportCards = [
@@ -451,12 +457,12 @@ export function ReportsView({ currencySymbol = "C$" }) {
                         </thead>
                         <tbody>
                           {rows.map((row, i) => (
-                            <tr key={`${row.id || i}`} className="border-b border-slate-100">
-                              <td className="px-2 py-2">#{row.id || "-"}</td>
-                              <td className="px-2 py-2">{String(row.fechaCierre || row.fecha || "-").slice(0, 10)}</td>
-                              <td className="px-2 py-2">{row.estado || "-"}</td>
-                              <td className="px-2 py-2">{formatCurrency(row.montoReal ?? row.total ?? 0, currencySymbol)}</td>
-                              <td className="px-2 py-2 font-semibold">{formatCurrency(row.totalVentas ?? row.total ?? 0, currencySymbol)}</td>
+                            <tr key={`${cierreId(row) ?? i}`} className="border-b border-slate-100">
+                              <td className="px-2 py-2">#{cierreId(row) ?? "-"}</td>
+                              <td className="px-2 py-2">{String(cierreFechaRaw(row) || "-").slice(0, 10)}</td>
+                              <td className="px-2 py-2">{row.estado ?? row.Estado ?? "-"}</td>
+                              <td className="px-2 py-2">{formatCurrency(cierreHistorialMontoPrincipal(row), currencySymbol)}</td>
+                              <td className="px-2 py-2 font-semibold">{formatCurrency(cierreHistorialTotalVentas(row), currencySymbol)}</td>
                             </tr>
                           ))}
                         </tbody>

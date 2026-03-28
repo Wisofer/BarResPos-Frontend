@@ -1,10 +1,11 @@
-import { BarChart3, ClipboardList, Home, Package, Settings, ShieldUser, SquareTerminal, Table, UtensilsCrossed } from "lucide-react";
+import { BarChart3, ClipboardList, Home, Package, Settings, ShieldUser, SquareTerminal, Table, Truck, UtensilsCrossed } from "lucide-react";
 
 export const NAV_ITEMS = [
   { id: "dashboard", label: "Dashboard", icon: Home },
   { id: "orders", label: "Pedidos", icon: ClipboardList },
   { id: "tables", label: "Mesas", icon: Table },
   { id: "products", label: "Productos", icon: Package },
+  { id: "providers", label: "Proveedores", icon: Truck },
   { id: "kitchen", label: "Cocina", icon: UtensilsCrossed },
   { id: "cashier", label: "Caja", icon: SquareTerminal },
   { id: "users", label: "Usuarios", icon: ShieldUser },

@@ -14,6 +14,7 @@ import {
   KitchenView,
   OrdersView,
   ProductsView,
+  ProvidersView,
   ReportsView,
   SettingsView,
   TablesView,
@@ -26,6 +27,7 @@ const TITLES = {
   orders: "Gestion de pedidos",
   tables: "Gestion de mesas",
   products: "Gestion de productos",
+  providers: "Proveedores",
   kitchen: "Cocina",
   cashier: "Caja",
   users: "Usuarios",
@@ -202,6 +204,7 @@ export function AuthHome() {
 
   const ActiveView = useMemo(() => {
     if (activeView === "products") return ProductsView;
+    if (activeView === "providers") return ProvidersView;
     if (activeView === "kitchen") return KitchenView;
     if (activeView === "cashier") return CashierView;
     if (activeView === "users") return UsersView;
