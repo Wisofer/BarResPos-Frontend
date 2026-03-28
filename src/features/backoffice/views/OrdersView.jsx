@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Check, Download, Eye, FilterX, Pencil, Printer, Search, X, XCircle } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { ListSkeleton } from "../components/index.js";
+import { PAGINATION } from "../constants/pagination.js";
 import { formatCurrency } from "../utils/currency.js";
 import { getApiUrl } from "../../../api/config.js";
 import { getToken } from "../../../api/token.js";
@@ -9,6 +10,17 @@ import { useAuth } from "../../../contexts/AuthContext.jsx";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
 import { isAdminUser } from "../utils/auth.js";
+import {
+  pagoDescuentoAtribuidoCordobas,
+  pagoDescuentoMotivo,
+  pagoFecha,
+  pagoMontoNetoCobradoCordobas,
+  pagoTipo,
+  pedidoDescuentoCobroCordobas,
+  pedidoPagosLista,
+  pedidoSubtotalConsumoCordobas,
+  pedidoTotalNetoCobradoCordobas,
+} from "../utils/pedidoCobro.js";
 
 function statusClass(status) {
   if (status === "Listo") return "bg-emerald-50 text-emerald-700";
@@ -56,6 +68,8 @@ export function OrdersView({ currencySymbol = "C$" }) {
     pagados: 0,
     pendientes: 0,
     montoTotal: 0,
+    montoTotalCobradoNeto: null,
+    descuentoTotalCordobas: 0,
   });
   const [page, setPage] = useState(1);
   const [pageInfo, setPageInfo] = useState({ totalPages: 1, totalItems: 0 });
@@ -95,34 +109,51 @@ export function OrdersView({ currencySymbol = "C$" }) {
 
       const [resumen, listado] = await Promise.all([
         backofficeApi.pedidosResumen(filterParams),
-        backofficeApi.listPedidos({ ...filterParams, page, pageSize: 20 }),
+        backofficeApi.listPedidos({ ...filterParams, page, pageSize: PAGINATION.LIST_DEFAULT }),
       ]);
 
       const items = listado?.items || [];
-      const mapped = items.map((p, i) => ({
-        rowId: p.id,
-        id: p.codigo || p.numero || `#${1200 + i}`,
-        numero: p.numero || null,
-        table: p.mesa || p.mesaNombre || p.origen || "Mesa",
-        waiter: p.mesero || p.meseroNombre || "-",
-        mesaId: p.mesaId || null,
-        meseroId: p.meseroId || null,
-        clienteId: p.clienteId || null,
-        estadoCocina: p.estadoCocina || "",
-        observaciones: p.observaciones || "",
-        createdAt: p.fechaCreacion || null,
-        item: p.descripcion || p.resumen || "Pedido",
-        productsCount: Number(p.productosCount || 0),
-        total: Number(p.monto ?? p.total ?? 0),
-        amount: formatCurrency(Number(p.monto ?? p.total ?? 0), currencySymbol),
-        status: p.estado || "Pendiente",
-      }));
+      const mapped = items.map((p, i) => {
+        const consumo = pedidoSubtotalConsumoCordobas(p);
+        const neto = pedidoTotalNetoCobradoCordobas(p);
+        return {
+          rowId: p.id,
+          id: p.codigo || p.numero || `#${1200 + i}`,
+          numero: p.numero || null,
+          table: p.mesa || p.mesaNombre || p.origen || "Mesa",
+          waiter: p.mesero || p.meseroNombre || "-",
+          mesaId: p.mesaId || null,
+          meseroId: p.meseroId || null,
+          clienteId: p.clienteId || null,
+          estadoCocina: p.estadoCocina || "",
+          observaciones: p.observaciones || "",
+          createdAt: p.fechaCreacion || null,
+          item: p.descripcion || p.resumen || "Pedido",
+          productsCount: Number(p.productosCount || 0),
+          total: consumo,
+          amount: formatCurrency(consumo, currencySymbol),
+          totalNetoCobrado: neto,
+          amountNeto: neto != null ? formatCurrency(neto, currencySymbol) : null,
+          status: p.estado || "Pendiente",
+        };
+      });
+
+      const netoResumen = resumen?.montoTotalCobradoNetoCordobas ?? resumen?.MontoTotalCobradoNetoCordobas;
+      const descResumen = resumen?.descuentoTotalCordobas ?? resumen?.DescuentoTotalCordobas ?? 0;
+      const consumoResumen =
+        resumen?.montoTotalConsumoCordobas ??
+        resumen?.MontoTotalConsumoCordobas ??
+        resumen?.montoTotal ??
+        resumen?.MontoTotal ??
+        0;
 
       setCards({
         totalPedidos: Number(resumen?.totalPedidos || 0),
         pagados: Number(resumen?.pagados || 0),
         pendientes: Number(resumen?.pendientes || 0),
-        montoTotal: Number(resumen?.montoTotal || 0),
+        montoTotal: Number(consumoResumen || 0),
+        montoTotalCobradoNeto: netoResumen != null && netoResumen !== "" ? Number(netoResumen) : null,
+        descuentoTotalCordobas: Number(descResumen || 0),
       });
       setOrders(mapped);
       setPageInfo({
@@ -421,7 +452,10 @@ export function OrdersView({ currencySymbol = "C$" }) {
     }
 
     const items = Array.isArray(order.items) ? order.items : [];
-    const total = Number(order.monto || 0) || items.reduce((acc, it) => acc + Number(it.monto || 0), 0);
+    const sumLines = items.reduce((acc, it) => acc + Number(it.monto || 0), 0);
+    const subConsumoPrint = pedidoSubtotalConsumoCordobas(order) || sumLines;
+    const descPrint = pedidoDescuentoCobroCordobas(order);
+    const netoPrint = pedidoTotalNetoCobradoCordobas(order);
     const rows = items
       .map((it) => {
         const producto = it.servicio || "-";
@@ -457,7 +491,8 @@ export function OrdersView({ currencySymbol = "C$" }) {
       table{width:100%;border-collapse:collapse;font-size:12px}
       th,td{padding:6px 4px;border-bottom:1px solid #e5e7eb}
       th{text-align:left;background:#f8fafc}
-      .total{margin-top:12px;text-align:right;font-weight:700}
+      .totals{margin-top:12px;text-align:right;font-size:13px;line-height:1.5}
+      .totals .strong{font-weight:700}
     </style>
   </head>
   <body>
@@ -480,7 +515,19 @@ export function OrdersView({ currencySymbol = "C$" }) {
       </thead>
       <tbody>${rows || '<tr><td colspan="5" style="text-align:center;color:#666">Sin productos</td></tr>'}</tbody>
     </table>
-    <div class="total">Total: ${escapeHtml(formatCurrency(total, currencySymbol))}</div>
+    <div class="totals">
+      <div>Subtotal consumo: <span class="strong">${escapeHtml(formatCurrency(subConsumoPrint, currencySymbol))}</span></div>
+      ${
+        descPrint > 0.0001
+          ? `<div>Descuento (cobro): −${escapeHtml(formatCurrency(descPrint, currencySymbol))}</div>`
+          : ""
+      }
+      ${
+        netoPrint != null && Number.isFinite(netoPrint)
+          ? `<div>Total pagado (neto): <span class="strong">${escapeHtml(formatCurrency(netoPrint, currencySymbol))}</span></div>`
+          : `<div>Total: <span class="strong">${escapeHtml(formatCurrency(subConsumoPrint, currencySymbol))}</span></div>`
+      }
+    </div>
   </body>
 </html>`;
 
@@ -507,13 +554,18 @@ export function OrdersView({ currencySymbol = "C$" }) {
       ? paidAtLabel
       : "-";
     const items = Array.isArray(detailOrder.items) ? detailOrder.items : [];
-    const subtotal = items.reduce((acc, it) => acc + Number(it.monto || 0), 0);
+    const subtotalLines = items.reduce((acc, it) => acc + Number(it.monto || 0), 0);
+    const subConsumoDetalle = pedidoSubtotalConsumoCordobas(detailOrder) || subtotalLines;
+    const descCobroDetalle = pedidoDescuentoCobroCordobas(detailOrder);
+    const netoCobradoDetalle = pedidoTotalNetoCobradoCordobas(detailOrder);
+    const pagosDetalle = pedidoPagosLista(detailOrder);
+    const estadoDetalle = String(detailOrder.estado || "");
     return (
-      <div className="space-y-4">
+      <div className="min-w-0 max-w-full space-y-4">
         {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Detalle de pedido</p>
               <h2 className="mt-1 text-xl font-bold text-slate-800">{detailOrder.numero || `#${detailOrder.id}`}</h2>
               <p className="text-sm text-slate-500">Vista completa del pedido y sus productos.</p>
@@ -595,8 +647,8 @@ export function OrdersView({ currencySymbol = "C$" }) {
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td colSpan={3} className="px-3 py-2 text-right text-sm font-semibold text-slate-700">Total:</td>
-                      <td className="px-3 py-2 text-sm font-bold text-slate-900">{formatCurrency(detailOrder.monto || subtotal, currencySymbol)}</td>
+                      <td colSpan={3} className="px-3 py-2 text-right text-sm font-semibold text-slate-700">Total consumo (subtotal):</td>
+                      <td className="px-3 py-2 text-sm font-bold text-slate-900">{formatCurrency(subConsumoDetalle, currencySymbol)}</td>
                       <td />
                     </tr>
                   </tfoot>
@@ -607,12 +659,65 @@ export function OrdersView({ currencySymbol = "C$" }) {
 
             <section className="space-y-4">
               <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h3 className="mb-3 text-sm font-semibold text-slate-800">Resumen</h3>
+                <h3 className="mb-3 text-sm font-semibold text-slate-800">Resumen (cobro)</h3>
                 <div className="space-y-2 text-sm">
-                  <div className="flex items-center justify-between"><span className="text-slate-500">Subtotal:</span><span className="font-semibold text-slate-800">{formatCurrency(subtotal, currencySymbol)}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-slate-500">Total:</span><span className="font-bold text-slate-900">{formatCurrency(detailOrder.monto || subtotal, currencySymbol)}</span></div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500">Subtotal consumo</span>
+                    <span className="font-semibold text-slate-800">{formatCurrency(subConsumoDetalle, currencySymbol)}</span>
+                  </div>
+                  {descCobroDetalle > 0.0001 && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">Descuento en cobro</span>
+                      <span className="font-semibold text-amber-800">−{formatCurrency(descCobroDetalle, currencySymbol)}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                    <span className="text-slate-600">Total pagado (neto)</span>
+                    <span className="font-bold text-emerald-900">
+                      {estadoDetalle === "Pagado" && netoCobradoDetalle != null
+                        ? formatCurrency(netoCobradoDetalle, currencySymbol)
+                        : "—"}
+                    </span>
+                  </div>
                 </div>
               </article>
+              {pagosDetalle.length > 0 && (
+                <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <h3 className="mb-3 text-sm font-semibold text-slate-800">Pagos</h3>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-xs">
+                      <thead className="border-b border-slate-200 text-left text-slate-500">
+                        <tr>
+                          <th className="py-1.5 pr-2 font-medium">Fecha</th>
+                          <th className="py-1.5 pr-2 font-medium">Tipo</th>
+                          <th className="py-1.5 pr-2 font-medium text-right">Neto ({currencySymbol})</th>
+                          <th className="py-1.5 font-medium text-right">Desc. atrib.</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {pagosDetalle.map((pg, idx) => {
+                          const pid = pg.id ?? pg.Id ?? `pago-${idx}`;
+                          const netoP = pagoMontoNetoCobradoCordobas(pg);
+                          const descA = pagoDescuentoAtribuidoCordobas(pg);
+                          const motivo = pagoDescuentoMotivo(pg);
+                          return (
+                            <tr key={pid}>
+                              <td className="py-1.5 pr-2 whitespace-nowrap">{formatDateTimeLabel(pagoFecha(pg))}</td>
+                              <td className="py-1.5 pr-2">{pagoTipo(pg)}</td>
+                              <td className="py-1.5 pr-2 text-right font-medium">
+                                {netoP != null ? formatCurrency(netoP, currencySymbol) : "—"}
+                              </td>
+                              <td className="py-1.5 text-right" title={motivo || undefined}>
+                                {descA > 0.0001 ? `−${formatCurrency(descA, currencySymbol)}` : "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </article>
+              )}
               <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <h3 className="mb-3 text-sm font-semibold text-slate-800">Fechas</h3>
                 <div className="space-y-2 text-sm text-slate-700">
@@ -844,11 +949,11 @@ export function OrdersView({ currencySymbol = "C$" }) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto min-w-0 max-w-full space-y-4">
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
+          <div className="min-w-0">
             <h2 className="text-lg font-semibold text-slate-800">Todos los pedidos</h2>
             <p className="text-sm text-slate-500">Consulta, filtra y gestiona todos los pedidos del sistema.</p>
           </div>
@@ -873,7 +978,7 @@ export function OrdersView({ currencySymbol = "C$" }) {
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs text-slate-500">Pedidos totales</p>
             <p className="mt-1 text-lg font-bold text-slate-800">{cards.totalPedidos}</p>
@@ -886,9 +991,24 @@ export function OrdersView({ currencySymbol = "C$" }) {
             <p className="text-xs text-slate-500">Pendientes</p>
             <p className="mt-1 text-lg font-bold text-slate-800">{cards.pendientes}</p>
           </article>
-          <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p className="text-xs text-slate-500">Monto total</p>
+          <article className="rounded-xl border border-slate-200 bg-slate-50 p-3" title="Suma de montos de pedido (consumo), no el ingreso neto">
+            <p className="text-xs text-slate-500">Total consumo (pedidos)</p>
             <p className="mt-1 text-lg font-bold text-slate-800">{formatCurrency(cards.montoTotal, currencySymbol)}</p>
+          </article>
+          <article
+            className="rounded-xl border border-slate-200 bg-slate-50 p-3"
+            title="Suma del neto cobrado en pedidos Pagados del filtro; alinea con caja/recibo"
+          >
+            <p className="text-xs text-slate-500">Cobrado (neto)</p>
+            <p className="mt-1 text-lg font-bold text-slate-800">
+              {cards.montoTotalCobradoNeto != null && Number.isFinite(cards.montoTotalCobradoNeto)
+                ? formatCurrency(cards.montoTotalCobradoNeto, currencySymbol)
+                : "—"}
+            </p>
+          </article>
+          <article className="rounded-xl border border-slate-200 bg-slate-50 p-3" title="Descuentos aplicados en el cobro">
+            <p className="text-xs text-slate-500">Descuentos en cobro</p>
+            <p className="mt-1 text-lg font-bold text-slate-800">{formatCurrency(cards.descuentoTotalCordobas, currencySymbol)}</p>
           </article>
         </div>
 
@@ -907,46 +1027,46 @@ export function OrdersView({ currencySymbol = "C$" }) {
           ))}
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-6">
-          <div className="relative md:col-span-2">
+        <div className="mt-4 grid grid-cols-1 gap-2 min-w-0 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="relative min-w-0 sm:col-span-2 xl:col-span-2">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
             <input
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Buscar por pedido, mesa o mesero"
-              className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm"
+              className="w-full min-w-0 rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm"
             />
           </div>
           <input
             value={filters.mesaId}
             onChange={(e) => setFilters((prev) => ({ ...prev, mesaId: e.target.value }))}
             placeholder="Mesa ID"
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
           <input
             value={filters.meseroId}
             onChange={(e) => setFilters((prev) => ({ ...prev, meseroId: e.target.value }))}
             placeholder="Mesero ID"
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
           <input
             type="date"
             value={filters.desde}
             onChange={(e) => setFilters((prev) => ({ ...prev, desde: e.target.value }))}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
           <input
             type="date"
             value={filters.hasta}
             onChange={(e) => setFilters((prev) => ({ ...prev, hasta: e.target.value }))}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
         </div>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
         <div className="overflow-x-auto rounded-xl border border-slate-200">
-          <table className="min-w-[980px] w-full text-sm">
+          <table className="min-w-[1100px] w-full text-sm">
             <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3 font-semibold">Pedido</th>
@@ -954,7 +1074,8 @@ export function OrdersView({ currencySymbol = "C$" }) {
                 <th className="px-4 py-3 font-semibold">Mesa</th>
                 <th className="px-4 py-3 font-semibold">Mesero</th>
                 <th className="px-4 py-3 font-semibold">Productos</th>
-                <th className="px-4 py-3 font-semibold">Total</th>
+                <th className="px-4 py-3 font-semibold">Consumo</th>
+                <th className="px-4 py-3 font-semibold">Cobrado (neto)</th>
                 <th className="px-4 py-3 font-semibold">Estado</th>
                 <th className="px-4 py-3 font-semibold">Acciones</th>
               </tr>
@@ -962,7 +1083,7 @@ export function OrdersView({ currencySymbol = "C$" }) {
             <tbody className="divide-y divide-slate-200 bg-white">
               {filteredOrders.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-sm text-slate-500">
+                  <td colSpan={9} className="px-4 py-6 text-center text-sm text-slate-500">
                     No hay pedidos para los filtros seleccionados.
                   </td>
                 </tr>
@@ -985,6 +1106,13 @@ export function OrdersView({ currencySymbol = "C$" }) {
                     </td>
                     <td className="px-4 py-3 text-slate-700">{order.productsCount} producto(s)</td>
                     <td className="px-4 py-3 font-semibold text-slate-800">{order.amount}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {order.status === "Pagado" && order.amountNeto != null ? (
+                        <span className="font-semibold text-emerald-800">{order.amountNeto}</span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <span className={`rounded-md px-2 py-1 text-xs font-medium ${statusClass(order.status)}`}>{order.status}</span>
                     </td>

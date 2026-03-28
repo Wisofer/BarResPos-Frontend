@@ -4,7 +4,9 @@ import { useSnackbar } from "../contexts/SnackbarContext.jsx";
 import { BackofficeShellHeaderActions, MobileNav, SidebarNav } from "../features/backoffice/components";
 import { NAV_ITEMS } from "../features/backoffice/constants.js";
 import { backofficeApi } from "../features/backoffice/services/backofficeApi.js";
+import { PAGINATION } from "../features/backoffice/constants/pagination.js";
 import { resolveCurrencySymbol } from "../features/backoffice/utils/currency.js";
+import { pickPortalTagline } from "../features/backoffice/utils/portalConfig.js";
 import { canAccessView, getAllowedViewIds } from "../features/backoffice/utils/auth.js";
 import { displayUserName } from "../utils/authUser.js";
 import {
@@ -81,6 +83,7 @@ export function AuthHome() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeView, setActiveView] = useState("dashboard");
   const [currencySymbol, setCurrencySymbol] = useState("C$");
+  const [portalTagline, setPortalTagline] = useState("");
   const [lowStockItems, setLowStockItems] = useState([]);
   const allowedViewIds = useMemo(() => getAllowedViewIds(user), [user]);
   const navItems = useMemo(() => NAV_ITEMS.filter((item) => allowedViewIds.includes(item.id)), [allowedViewIds]);
@@ -98,6 +101,7 @@ export function AuthHome() {
         if (!mounted) return;
         const list = Array.isArray(data) ? data : data?.items || [];
         setCurrencySymbol(resolveCurrencySymbol(list));
+        setPortalTagline(pickPortalTagline(list));
       })
       .catch(() => {});
     return () => {
@@ -127,7 +131,7 @@ export function AuthHome() {
     try {
       const [dashboard, productosRes] = await Promise.all([
         backofficeApi.dashboardResumen({ topProductos: 3 }),
-        backofficeApi.listProductos({ page: 1, pageSize: 500, activos: true }),
+        backofficeApi.listProductos({ page: 1, pageSize: PAGINATION.CATALOG_ALERTS, activos: true }),
       ]);
       let list = extractDashboardLowStockList(dashboard);
       if (list.length === 0) {
@@ -199,7 +203,7 @@ export function AuthHome() {
   const showViewHeader = true;
 
   return (
-    <main className="min-h-screen bg-slate-100 p-4 md:p-6">
+    <main className="min-h-screen min-w-0 bg-slate-100 p-4 md:p-6">
       <MobileNav
         open={mobileMenuOpen}
         setOpen={setMobileMenuOpen}
@@ -223,7 +227,7 @@ export function AuthHome() {
       />
 
       <div
-        className={`grid min-h-[calc(100vh-2rem)] w-full grid-cols-1 gap-4 md:min-h-[calc(100vh-3rem)] lg:gap-6 ${
+        className={`grid min-h-[calc(100vh-2rem)] w-full min-w-0 grid-cols-1 gap-4 md:min-h-[calc(100vh-3rem)] lg:gap-6 ${
           sidebarCollapsed ? "lg:grid-cols-[88px_1fr]" : "lg:grid-cols-[260px_1fr]"
         }`}
       >
@@ -237,7 +241,7 @@ export function AuthHome() {
           navItems={navItems}
         />
 
-        <section className="space-y-6 pb-24 lg:pb-0 lg:pr-2">
+        <section className="min-w-0 space-y-6 pb-24 lg:pb-0 lg:pr-2">
           {showViewHeader && (
             <header className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
@@ -245,7 +249,9 @@ export function AuthHome() {
                   <h1 className="text-xl font-bold leading-tight text-slate-800 sm:text-2xl">
                     {TITLES[activeView] || `Hola ${displayUserName(user) || "equipo"} 👋`}
                   </h1>
-                  <p className="mt-1 text-xs text-slate-500 sm:text-sm">Vista modular con estructura limpia por carpetas.</p>
+                  {portalTagline ? (
+                    <p className="mt-1 text-xs text-slate-500 sm:text-sm">{portalTagline}</p>
+                  ) : null}
                 </div>
                 <div className="hidden shrink-0 lg:block">
                   <BackofficeShellHeaderActions

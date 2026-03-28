@@ -12,6 +12,7 @@ import {
   Trash2,
   TriangleAlert,
 } from "lucide-react";
+import { PAGINATION } from "../constants/pagination.js";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { BackofficeDialog, ListSkeleton, StatCardsSkeleton } from "../components/index.js";
 import { formatCurrency } from "../utils/currency.js";
@@ -120,7 +121,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
   const loadProducts = async (categoriaId = selectedCategory) => {
     const data = await backofficeApi.listProductos({
       page: 1,
-      pageSize: 120,
+      pageSize: PAGINATION.PRODUCTOS_ADMIN,
       search: search || undefined,
       categoriaId: categoriaId || undefined,
       activos: true,
@@ -247,7 +248,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
     setStockModalOpen(true);
     setStockModalLoading(true);
     try {
-      const data = await backofficeApi.listProductos({ page: 1, pageSize: 500, activos: true });
+      const data = await backofficeApi.listProductos({ page: 1, pageSize: PAGINATION.CATALOG_ALERTS, activos: true });
       const items = Array.isArray(data?.items) ? data.items : [];
       setStockModalProducts(items.filter(tieneControlStock));
     } catch {
@@ -310,8 +311,8 @@ export function ProductsView({ currencySymbol = "C$" }) {
     setError("");
     try {
       const [movRes, prodRes] = await Promise.all([
-        backofficeApi.movimientosProductos({ page: 1, pageSize: 200 }),
-        backofficeApi.listProductos({ page: 1, pageSize: 500, activos: true }).catch(() => ({ items: [] })),
+        backofficeApi.movimientosProductos({ page: 1, pageSize: PAGINATION.MOVIMIENTOS }),
+        backofficeApi.listProductos({ page: 1, pageSize: PAGINATION.CATALOG_ALERTS, activos: true }).catch(() => ({ items: [] })),
       ]);
       setMovementRows(Array.isArray(movRes?.items) ? movRes.items : []);
       setMovementProductLookup(Array.isArray(prodRes?.items) ? prodRes.items : []);
@@ -496,7 +497,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
   }
 
   return (
-    <>
+    <div className="min-w-0 space-y-4">
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1136,6 +1137,6 @@ export function ProductsView({ currencySymbol = "C$" }) {
         variant="danger"
         loading={saving}
       />
-    </>
+    </div>
   );
 }

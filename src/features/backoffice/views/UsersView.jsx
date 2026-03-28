@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
+import { PAGINATION } from "../constants/pagination.js";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { BackofficeDialog, ListSkeleton } from "../components/index.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
@@ -30,7 +31,7 @@ export function UsersView() {
   const loadUsers = async ({ currentPage = page, currentSearch = search, currentRol = rol, currentActivo = activo } = {}) => {
     const params = {
       page: currentPage,
-      pageSize: 20,
+      pageSize: PAGINATION.LIST_DEFAULT,
       search: currentSearch || undefined,
       rol: currentRol || undefined,
       activo: currentActivo === "" ? undefined : currentActivo === "true",
@@ -161,8 +162,11 @@ export function UsersView() {
         <div className="space-y-3">
           {users.length === 0 && <p className="text-sm text-slate-500">No hay usuarios.</p>}
           {users.map((u, i) => (
-            <article key={u.id || i} className="flex items-center justify-between rounded-xl border border-slate-200 p-4">
-              <div>
+            <article
+              key={u.id || i}
+              className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="min-w-0">
                 <p className="text-sm font-semibold text-slate-800">{u.nombreUsuario || u.nombre || "Usuario"}</p>
                 <p className="text-xs text-slate-500">Nombre: {u.nombreCompleto || "-"} | Rol: {u.rol || "N/D"} | Estado: {u.activo === false ? "Inactivo" : "Activo"}</p>
               </div>

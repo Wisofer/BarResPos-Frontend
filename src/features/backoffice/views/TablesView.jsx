@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRightLeft,
+  Bookmark,
   ChefHat,
-  Lock,
   Minus,
   MoreVertical,
   Pencil,
@@ -17,7 +17,8 @@ import { backofficeApi } from "../services/backofficeApi.js";
 import { BackofficeDialog, ListSkeleton, PosProcesarVentaModal, StatCardsSkeleton } from "../components/index.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
-import { formatCurrency } from "../utils/currency.js";
+import { PAGINATION } from "../constants/pagination.js";
+import { DEFAULT_TIPO_CAMBIO_USD, formatCurrency } from "../utils/currency.js";
 import { buildUpdatePedidoPayloadForMesaChange } from "../utils/pedidoMesa.js";
 import {
   extractPosOrdenResponseId,
@@ -36,14 +37,15 @@ import { isAdminUser } from "../utils/auth.js";
 import { useAuth } from "../../../contexts/AuthContext.jsx";
 import { getToken } from "../../../api/token.js";
 import { getApiUrl } from "../../../api/config.js";
+import {
+  mesaEsOcupadaVisual,
+  mesaEsReservada,
+  normalizeMesaEstado,
+  TablesMesasStatsBar,
+  TablesMesasZonesGrid,
+} from "../tables/index.js";
 
-function tableStatusClass(status) {
-  if (status === "Libre") return "bg-emerald-50 text-emerald-700 border-emerald-100";
-  if (status === "Reservada") return "bg-violet-50 text-violet-700 border-violet-100";
-  return "bg-amber-50 text-amber-700 border-amber-100";
-}
-
-export function TablesView({ onPosOpenChange }) {
+export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   const snackbar = useSnackbar();
   const { user } = useAuth();
   const [tables, setTables] = useState([]);
@@ -88,7 +90,7 @@ export function TablesView({ onPosOpenChange }) {
   const [saleBackendTotal, setSaleBackendTotal] = useState(null);
   const [saleOrdenId, setSaleOrdenId] = useState(null);
   const [saleProcessing, setSaleProcessing] = useState(false);
-  const [tipoCambio, setTipoCambio] = useState(36.8);
+  const [tipoCambio, setTipoCambio] = useState(null);
   const [locationsModalOpen, setLocationsModalOpen] = useState(false);
   const [locationForm, setLocationForm] = useState({ id: null, nombre: "", descripcion: "", activo: true });
   const [confirmDeleteLocation, setConfirmDeleteLocation] = useState({ open: false, id: null, name: "" });
@@ -129,7 +131,7 @@ export function TablesView({ onPosOpenChange }) {
   });
 
   const loadTables = async () => {
-    const data = await backofficeApi.listMesas({ page: 1, pageSize: 100 });
+    const data = await backofficeApi.listMesas({ page: 1, pageSize: PAGINATION.LIST_LARGE });
     const items = data?.items || [];
     setTables(Array.isArray(items) ? items.map(mapTable) : []);
   };
@@ -148,8 +150,9 @@ export function TablesView({ onPosOpenChange }) {
         setLocations(raw.map(normalizeLocation));
         const abierta = Boolean(caja?.abierta ?? caja?.Abierta ?? (caja?.estado || "").toLowerCase() === "abierto");
         setCajaAbierta(abierta);
-        const tcValue = Number(tc?.tipoCambioDolar ?? tc?.TipoCambioDolar ?? tc?.valor ?? 36.8);
+        const tcValue = Number(tc?.tipoCambioDolar ?? tc?.TipoCambioDolar ?? tc?.valor ?? 0);
         if (Number.isFinite(tcValue) && tcValue > 0) setTipoCambio(tcValue);
+        else setTipoCambio(DEFAULT_TIPO_CAMBIO_USD);
       })
       .catch((e) => mounted && setError(e.message || "No se pudo cargar mesas."))
       .finally(() => mounted && setLoading(false));
@@ -329,6 +332,53 @@ export function TablesView({ onPosOpenChange }) {
     }
   };
 
+  const refreshPosTableFromBackend = async (mesaId) => {
+    try {
+      const m = await backofficeApi.getMesa(mesaId);
+      if (m) setPosTable(mapTable(m, 0));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleReservarMesa = async () => {
+    if (!posTable || posOrderId) return;
+    if (normalizeMesaEstado(posTable.status) !== "Libre") return;
+    setPosActionBusy(true);
+    setError("");
+    try {
+      await backofficeApi.patchMesaEstado(posTable.id, "Reservada");
+      await loadTables();
+      await refreshPosTableFromBackend(posTable.id);
+      snackbar.success("Mesa reservada.");
+    } catch (e) {
+      const msg = e?.message || "No se pudo reservar la mesa.";
+      setError(msg);
+      snackbar.error(msg);
+    } finally {
+      setPosActionBusy(false);
+    }
+  };
+
+  const handleLiberarReserva = async () => {
+    if (!posTable || posOrderId) return;
+    if (!mesaEsReservada(posTable)) return;
+    setPosActionBusy(true);
+    setError("");
+    try {
+      await backofficeApi.patchMesaEstado(posTable.id, "Libre");
+      await loadTables();
+      await refreshPosTableFromBackend(posTable.id);
+      snackbar.success("Reserva quitada; mesa libre.");
+    } catch (e) {
+      const msg = e?.message || "No se pudo quitar la reserva.";
+      setError(msg);
+      snackbar.error(msg);
+    } finally {
+      setPosActionBusy(false);
+    }
+  };
+
   const removeTable = async (id) => {
     setSaving(true);
     setError("");
@@ -377,7 +427,7 @@ export function TablesView({ onPosOpenChange }) {
     try {
       const [orderActiva, productsData, categoriesData] = await Promise.all([
         backofficeApi.getMesaOrdenActiva(table.id).catch(() => null),
-        backofficeApi.listProductos({ page: 1, pageSize: 200, activos: true }),
+        backofficeApi.listProductos({ page: 1, pageSize: PAGINATION.POS_PRODUCTOS, activos: true }),
         backofficeApi.catalogoCategoriasProducto(),
       ]);
       const orderActive = unwrapEnvelope(orderActiva);
@@ -414,6 +464,18 @@ export function TablesView({ onPosOpenChange }) {
       grouped.get(zone).push(t);
     });
     return Array.from(grouped.entries()).map(([name, items]) => ({ name, items }));
+  }, [tables]);
+
+  const mesaStats = useMemo(() => {
+    let libres = 0;
+    let ocupadas = 0;
+    let reservadas = 0;
+    for (const t of tables) {
+      if (mesaEsOcupadaVisual(t)) ocupadas += 1;
+      else if (mesaEsReservada(t)) reservadas += 1;
+      else libres += 1;
+    }
+    return { libres, ocupadas, reservadas };
   }, [tables]);
 
   const filteredPosProducts = useMemo(() => {
@@ -464,6 +526,12 @@ export function TablesView({ onPosOpenChange }) {
 
           setPosCommitted(true);
           await loadTables();
+          try {
+            await backofficeApi.patchMesaEstado(Number(posTable.id), "Ocupada");
+          } catch {
+            /* el backend puede haberla marcado ya */
+          }
+          await refreshPosTableFromBackend(posTable.id);
         } catch (e) {
           rollbackPosLineQty(product.id, cantidad);
           const msg = e?.message || "No se pudo agregar el producto en backend.";
@@ -601,7 +669,7 @@ export function TablesView({ onPosOpenChange }) {
       }
     }
     try {
-      const data = await backofficeApi.listMesas({ page: 1, pageSize: 100 });
+      const data = await backofficeApi.listMesas({ page: 1, pageSize: PAGINATION.LIST_LARGE });
       const raw = data?.items || [];
       const mapped = raw.map(mapTable);
       const free = mapped.filter((t) => t.id !== posTable.id && t.status === "Libre");
@@ -710,7 +778,7 @@ export function TablesView({ onPosOpenChange }) {
       snackbar.error("Permita ventanas emergentes para imprimir la cuenta.");
       return;
     }
-    const sym = currency || "C$";
+    const sym = currency || currencySymbol;
     const esc = (s) =>
       String(s ?? "")
         .replace(/&/g, "&amp;")
@@ -884,6 +952,13 @@ export function TablesView({ onPosOpenChange }) {
       if (backendItems) setPosCart(mapBackendItemsToCart(backendItems));
 
       setPosCommitted(true);
+      await loadTables();
+      try {
+        await backofficeApi.patchMesaEstado(Number(posTable.id), "Ocupada");
+      } catch {
+        /* puede ya estar ocupada */
+      }
+      await refreshPosTableFromBackend(posTable.id);
       return currentId;
     } catch (e) {
       const msg = e?.message || "No se pudo enviar la orden.";
@@ -1025,6 +1100,10 @@ export function TablesView({ onPosOpenChange }) {
       const montoPagado =
         form.tipoPago === "Efectivo" ? Number(form.montoRecibidoCordobas || 0) : Number(form.totalAPagarCordobas || 0);
 
+      const descuentoMonto = Number(form.descuento) > 0 ? Number(form.descuento) : undefined;
+      const descuentoMotivo =
+        descuentoMonto != null && String(form.comentario || "").trim() ? String(form.comentario).trim() : undefined;
+
       const payload = {
         ordenId: Number(saleOrdenId),
         tipoPago: form.tipoPago,
@@ -1037,6 +1116,7 @@ export function TablesView({ onPosOpenChange }) {
         montoDolaresFisico: null,
         montoCordobasElectronico: null,
         montoDolaresElectronico: null,
+        ...(descuentoMonto != null ? { descuentoMonto, ...(descuentoMotivo ? { descuentoMotivo } : {}) } : {}),
       };
 
       let resp;
@@ -1170,7 +1250,7 @@ export function TablesView({ onPosOpenChange }) {
         zoneLabel: posTable.zone,
         lines,
         total,
-        currency: "C$",
+        currency: currencySymbol,
       });
       snackbar.info("Pre-cuenta lista para imprimir (modo local).");
     } catch (e) {
@@ -1208,15 +1288,42 @@ export function TablesView({ onPosOpenChange }) {
   if (posOpen && posTable) {
     return (
       <>
-        <section className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-100 p-3 shadow-sm lg:h-[calc(100vh-10.5rem)]">
-          <div className="mb-3 flex items-center justify-between">
-            <div>
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-100 p-3 shadow-sm lg:h-[calc(100vh-10.5rem)]">
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
               <h2 className="text-base font-semibold text-slate-800">
                 {String(posTable.zone || "").toUpperCase()} | {posTable.displayId}
               </h2>
-              <p className="text-xs text-slate-500">Selecciona productos para esta mesa.</p>
+              {mesaEsReservada(posTable) && !posOrderId ? (
+                <p className="mt-0.5 text-xs text-violet-800">
+                  Mesa <strong>reservada</strong>. Agrega productos a la orden para pasarla a <strong className="text-rose-700">ocupada</strong>.
+                </p>
+              ) : (
+                <p className="mt-0.5 text-xs text-slate-500">Selecciona productos para esta mesa.</p>
+              )}
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
+              {!posOrderId && normalizeMesaEstado(posTable.status) === "Libre" && (
+                <button
+                  type="button"
+                  onClick={() => void handleReservarMesa()}
+                  disabled={posActionBusy || !cajaAbierta}
+                  className="inline-flex items-center gap-1 rounded-lg border border-violet-800 bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Bookmark className="h-3.5 w-3.5 shrink-0" />
+                  Reservar mesa
+                </button>
+              )}
+              {!posOrderId && mesaEsReservada(posTable) && (
+                <button
+                  type="button"
+                  onClick={() => void handleLiberarReserva()}
+                  disabled={posActionBusy || !cajaAbierta}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Quitar reserva
+                </button>
+              )}
               {posOrderId && (
                 <button
                   type="button"
@@ -1352,8 +1459,8 @@ export function TablesView({ onPosOpenChange }) {
                                 <Plus className="h-3 w-3" />
                               </button>
                             </div>
-                            <span>P/U: {formatCurrency(item.price, "C$")}</span>
-                            <span className="font-semibold text-slate-800">{formatCurrency(item.price * item.qty, "C$")}</span>
+                            <span>P/U: {formatCurrency(item.price, currencySymbol)}</span>
+                            <span className="font-semibold text-slate-800">{formatCurrency(item.price * item.qty, currencySymbol)}</span>
                           </div>
                         </div>
                       ))}
@@ -1363,8 +1470,8 @@ export function TablesView({ onPosOpenChange }) {
                 {posCart.length > 0 && (
                   <>
                     <div className="mt-2 space-y-1 text-xs text-slate-700">
-                      <div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(posSubtotal, "C$")}</span></div>
-                      <div className="flex justify-between"><span>Total</span><span className="font-bold">{formatCurrency(posSubtotal, "C$")}</span></div>
+                      <div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(posSubtotal, currencySymbol)}</span></div>
+                      <div className="flex justify-between"><span>Total</span><span className="font-bold">{formatCurrency(posSubtotal, currencySymbol)}</span></div>
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-1.5 border-t border-slate-200 pt-2">
                       {posOrderId && (
@@ -1435,7 +1542,7 @@ export function TablesView({ onPosOpenChange }) {
             <div className="sticky bottom-0 z-10 mt-3 flex items-center justify-between rounded-xl border border-slate-300 bg-white px-3 py-2 shadow-sm lg:hidden">
               <div>
                 <p className="text-[11px] text-slate-500">Total</p>
-                <p className="text-sm font-bold text-slate-800">{formatCurrency(posSubtotal, "C$")}</p>
+                <p className="text-sm font-bold text-slate-800">{formatCurrency(posSubtotal, currencySymbol)}</p>
               </div>
               <button
                 type="button"
@@ -1497,10 +1604,10 @@ export function TablesView({ onPosOpenChange }) {
                               </button>
                             </div>
                           </td>
-                          <td className="px-2 py-2">{formatCurrency(item.price, "C$")}</td>
+                          <td className="px-2 py-2">{formatCurrency(item.price, currencySymbol)}</td>
                           <td className="px-2 py-2 font-semibold">
                             <div className="flex items-center justify-between gap-2">
-                              <span>{formatCurrency(item.price * item.qty, "C$")}</span>
+                              <span>{formatCurrency(item.price * item.qty, currencySymbol)}</span>
                               <button
                                 type="button"
                                 onClick={() => removeFromCart(item.id)}
@@ -1519,8 +1626,8 @@ export function TablesView({ onPosOpenChange }) {
               </div>
               {posCart.length > 0 && (
                 <div className="mt-2 ml-auto w-full max-w-[220px] space-y-1 text-xs text-slate-700">
-                  <div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(posSubtotal, "C$")}</span></div>
-                  <div className="flex justify-between"><span>Total</span><span className="font-bold">{formatCurrency(posSubtotal, "C$")}</span></div>
+                  <div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(posSubtotal, currencySymbol)}</span></div>
+                  <div className="flex justify-between"><span>Total</span><span className="font-bold">{formatCurrency(posSubtotal, currencySymbol)}</span></div>
                 </div>
               )}
 
@@ -1590,10 +1697,10 @@ export function TablesView({ onPosOpenChange }) {
           open={saleModalOpen}
           onClose={() => !saleProcessing && setSaleModalOpen(false)}
           mesaLabel={`${String(posTable?.zone || "").toUpperCase()} | ${posTable?.displayId || ""}`}
-          currencySymbol="C$"
+          currencySymbol={currencySymbol}
+          exchangeRate={tipoCambio ?? DEFAULT_TIPO_CAMBIO_USD}
           lines={saleModalLines}
           totalOrdenBackend={saleBackendTotal}
-          exchangeRate={tipoCambio}
           busy={saleProcessing}
           onGuardar={handleGuardarVenta}
         />
@@ -1648,155 +1755,29 @@ export function TablesView({ onPosOpenChange }) {
   }
 
   return (
-    <>
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700">Total: {tables.length}</span>
-            <span className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">Libres: {tables.filter((t) => t.status === "Libre").length}</span>
-            <span className="rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700">Ocupadas: {tables.filter((t) => t.status === "Ocupada").length}</span>
-            <span className="rounded-lg bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700">Reservadas: {tables.filter((t) => t.status === "Reservada").length}</span>
-            <span className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${cajaAbierta ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
-              Caja: {cajaAbierta ? "Abierta" : "Cerrada"}
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button onClick={openLocationsManager} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100">
-              Ubicaciones
-            </button>
-            <button onClick={openCreate} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">
-              Nueva mesa
-            </button>
-          </div>
-        </div>
+    <div className="min-w-0 space-y-4">
+      <section className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <TablesMesasStatsBar
+          total={tables.length}
+          libres={mesaStats.libres}
+          ocupadas={mesaStats.ocupadas}
+          reservadas={mesaStats.reservadas}
+          cajaAbierta={cajaAbierta}
+          onUbicaciones={openLocationsManager}
+          onNuevaMesa={openCreate}
+        />
 
-        {zones.length === 0 && <p className="text-sm text-slate-500">No hay mesas registradas.</p>}
-        <div className="space-y-4">
-          {zones.map((zone) => (
-            <div key={zone.name}>
-              <div className="mb-2 rounded-md bg-amber-200/70 py-1 text-center text-[11px] font-bold uppercase tracking-widest text-amber-900">
-                {zone.name}
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-                {zone.items.map((table) => (
-                  <article
-                    key={table.id}
-                    className={`relative group rounded-xl border p-3 shadow-sm transition ${
-                      cajaAbierta ? "hover:-translate-y-0.5 hover:shadow" : "opacity-95"
-                    } ${
-                      table.hasActiveOrder ? "border-red-600 bg-red-600 text-white" : "border-slate-200 bg-white text-slate-900"
-                    }`}
-                  >
-                    {!cajaAbierta && (
-                      <div className="absolute inset-0 z-10 rounded-xl bg-slate-900/20" />
-                    )}
-                    {isAdmin && (
-                      <>
-                        {/* Desktop: botones al hacer hover */}
-                        <div className="absolute right-2 top-2 z-20 hidden gap-1 lg:flex opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              openEdit(table.id);
-                            }}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white/90 text-slate-700 hover:bg-white"
-                            title="Editar mesa"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              setConfirmDeleteTable({ open: true, id: table.id });
-                            }}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-200 bg-white/90 text-red-600 hover:bg-white"
-                            title="Borrar mesa"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-
-                        {/* Mobile/Tablet: menú ... */}
-                        <div className="absolute right-2 top-2 z-50 lg:hidden">
-                          <button
-                            type="button"
-                            data-table-menu-trigger
-                            aria-label="Acciones de mesa"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              setActiveTableMenu((curr) => (curr === table.id ? null : table.id));
-                            }}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white/90 text-slate-700 hover:bg-white"
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </button>
-                          {activeTableMenu === table.id && (
-                            <div
-                              data-table-menu
-                              onClick={(e) => e.stopPropagation()}
-                              className="absolute right-0 top-9 z-[60] w-36 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg pointer-events-auto"
-                            >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setActiveTableMenu(null);
-                                  openEdit(table.id);
-                                }}
-                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                              >
-                                <Pencil className="h-3.5 w-3.5 text-slate-600" />
-                                Editar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setActiveTableMenu(null);
-                                  setConfirmDeleteTable({ open: true, id: table.id });
-                                }}
-                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-red-600 hover:bg-rose-50"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                Borrar
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </>
-                    )}
-
-                    <div className="mb-2 flex items-start justify-between gap-2">
-                      <p className={`text-xs font-bold uppercase ${table.hasActiveOrder ? "text-white" : "text-slate-800"}`}>{table.displayId}</p>
-                      {table.hasActiveOrder && table.activeOrdersCount > 0 && (
-                        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-400 px-1.5 text-[10px] font-bold text-white">
-                          {table.activeOrdersCount}
-                        </span>
-                      )}
-                    </div>
-
-                    <button type="button" onClick={() => openPosView(table)} className="w-full" disabled={!cajaAbierta}>
-                      <img src={tableIllustration} alt={`Mesa ${table.displayId}`} className="mx-auto h-28 w-full object-contain" />
-                    </button>
-                    {!cajaAbierta && (
-                      <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-20 inline-flex items-center justify-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[11px] font-semibold text-slate-700">
-                        <Lock className="h-3.5 w-3.5" />
-                        Bloqueada por caja cerrada
-                      </div>
-                    )}
-
-                  </article>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+        <TablesMesasZonesGrid
+          zones={zones}
+          cajaAbierta={cajaAbierta}
+          isAdmin={isAdmin}
+          tableIllustration={tableIllustration}
+          activeTableMenu={activeTableMenu}
+          setActiveTableMenu={setActiveTableMenu}
+          onOpenPos={openPosView}
+          onOpenEdit={openEdit}
+          onRequestDelete={(id) => setConfirmDeleteTable({ open: true, id })}
+        />
       </section>
 
       {formOpen && (
@@ -1988,6 +1969,6 @@ export function TablesView({ onPosOpenChange }) {
         variant="danger"
         loading={saving}
       />
-    </>
+    </div>
   );
 }

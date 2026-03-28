@@ -1,3 +1,6 @@
+/** Si /configuraciones/tipo-cambio no devuelve valor válido (solo respaldo). */
+export const DEFAULT_TIPO_CAMBIO_USD = 36.8;
+
 export function formatCurrency(value, symbol = "C$") {
   const amount = Number(value ?? 0);
   if (!Number.isFinite(amount)) return `${symbol} 0.00`;

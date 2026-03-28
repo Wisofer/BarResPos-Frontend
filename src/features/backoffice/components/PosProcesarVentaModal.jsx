@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { formatCurrency } from "../utils/currency.js";
+import { DEFAULT_TIPO_CAMBIO_USD, formatCurrency } from "../utils/currency.js";
 
 /**
  * Modal "Procesar venta": totales, efectivo recibido / vuelto, u otros métodos al total exacto.
@@ -13,7 +13,7 @@ export function PosProcesarVentaModal({
   lines = [],
   /** Total desde backend (preferido) */
   totalOrdenBackend,
-  exchangeRate = 36.8,
+  exchangeRate,
   busy = false,
   onGuardar,
 }) {
@@ -22,7 +22,7 @@ export function PosProcesarVentaModal({
   const [tipoPago, setTipoPago] = useState("Efectivo");
   const [moneda, setMoneda] = useState("C$");
   const [comentario, setComentario] = useState("");
-  const tc = Number(exchangeRate) > 0 ? Number(exchangeRate) : 36.8;
+  const tc = Number(exchangeRate) > 0 ? Number(exchangeRate) : DEFAULT_TIPO_CAMBIO_USD;
   const isUsd = moneda === "USD";
 
   const subtotalLineas = useMemo(
@@ -225,7 +225,7 @@ export function PosProcesarVentaModal({
             disabled={busy || (tipoPago === "Efectivo" && recibidoCordobas + 1e-6 < totalAPagarCordobas)}
             className="flex-1 rounded-xl bg-amber-500 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
           >
-            {busy ? "Guardando…" : "Guardar"}
+            {busy ? "Cobrando…" : "Cobrar"}
           </button>
         </div>
       </form>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PAGINATION } from "../constants/pagination.js";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { ListSkeleton } from "../components/index.js";
 import { formatCurrency } from "../utils/currency.js";
@@ -34,7 +35,7 @@ export function CashierView({ currencySymbol = "C$" }) {
     const [e, prev, hist] = await Promise.all([
       backofficeApi.cajaEstado(),
       backofficeApi.cajaCierrePreview().catch(() => null),
-      backofficeApi.cajaHistorial({ page, pageSize: 10 }).catch(() => ({ items: [], totalPages: 1, page: 1 })),
+      backofficeApi.cajaHistorial({ page, pageSize: PAGINATION.LIST_DEFAULT }).catch(() => ({ items: [], totalPages: 1, page: 1 })),
     ]);
     setEstado(e || null);
     setPreview(prev || null);
@@ -163,7 +164,7 @@ export function CashierView({ currencySymbol = "C$" }) {
   const cajaAbierta = estado?.abierta || estado?.estado === "Abierto";
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
+    <div className="mx-auto min-w-0 max-w-3xl space-y-4">
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
       {!cajaAbierta && !showApertura && (

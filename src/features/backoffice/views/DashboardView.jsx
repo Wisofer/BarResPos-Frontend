@@ -150,7 +150,7 @@ export function DashboardView({ currencySymbol = "C$" }) {
   if (loading) return <><StatCardsSkeleton /><ListSkeleton rows={4} /></>;
 
   return (
-    <div className="mx-auto max-w-7xl space-y-4">
+    <div className="mx-auto min-w-0 max-w-7xl space-y-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((item, idx) => {
           const Icon = icons[idx];
@@ -236,11 +236,11 @@ export function DashboardView({ currencySymbol = "C$" }) {
               <h2 className="text-base font-semibold text-slate-800">Ingresos mensuales</h2>
               <Clock3 className="h-4 w-4 text-slate-400" />
             </div>
-            <div className="mt-3 h-52 rounded-lg border border-slate-100 bg-slate-50 p-2">
+            <div className="mt-3 h-52 min-w-0 overflow-x-auto rounded-lg border border-slate-100 bg-slate-50 p-2">
               {salesSeries.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-xs text-slate-500">Sin datos de ingresos mensuales.</div>
               ) : (
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer className="min-w-[260px]" width="100%" height="100%">
                   <BarChart data={salesSeries} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1">

@@ -196,7 +196,7 @@ export function SettingsView() {
   if (loading) return <ListSkeleton rows={5} />;
   const normalizedSettings = settings.filter((s) => String(s?.clave || "").toLowerCase() !== "tipocambiodolar");
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 max-w-full space-y-4">
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1.3fr]">
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
