@@ -147,7 +147,9 @@ export function KitchenView() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-lg font-semibold text-slate-800">Cocina (KDS)</h2>
-            <p className="text-xs text-slate-500">Controla estados de producción de forma visual.</p>
+            <p className="text-xs text-slate-500">
+              Solo aparecen ítems de categorías marcadas para cocina; bebidas u otras categorías “solo barra” no se listan aquí.
+            </p>
           </div>
           <button
             type="button"

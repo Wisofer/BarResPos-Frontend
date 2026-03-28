@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, Pencil, Plus, Trash2, TriangleAlert } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { ListSkeleton, StatCardsSkeleton } from "../components/index.js";
@@ -7,6 +7,7 @@ import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
 import { getApiUrl } from "../../../api/config.js";
 import { getToken } from "../../../api/token.js";
+import { ProductCategoriesView } from "./ProductCategoriesView.jsx";
 
 export function ProductsView({ currencySymbol = "C$" }) {
   const snackbar = useSnackbar();
@@ -23,7 +24,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
   const [stockMode, setStockMode] = useState("entrada");
   const [movementModalOpen, setMovementModalOpen] = useState(false);
   const [productHistoryModalOpen, setProductHistoryModalOpen] = useState(false);
-  const [categoriesModalOpen, setCategoriesModalOpen] = useState(false);
+  const [categoriesScreen, setCategoriesScreen] = useState(false);
   const [providersModalOpen, setProvidersModalOpen] = useState(false);
   const [movementRows, setMovementRows] = useState([]);
   const [historyRows, setHistoryRows] = useState([]);
@@ -51,15 +52,6 @@ export function ProductsView({ currencySymbol = "C$" }) {
     subtipo: "Daño",
     cantidadNueva: "",
     observaciones: "",
-  });
-  const [categoryForm, setCategoryForm] = useState({
-    id: null,
-    nombre: "",
-    descripcion: "",
-    colorHex: "#3B82F6",
-    iconoNombre: "",
-    orden: 1,
-    activo: true,
   });
   const [providerForm, setProviderForm] = useState({
     id: null,
@@ -99,6 +91,15 @@ export function ProductsView({ currencySymbol = "C$" }) {
     };
   }, []);
 
+  const reloadCategoriesOnly = useCallback(async () => {
+    try {
+      const cat = await backofficeApi.catalogoCategoriasProducto();
+      setCategories(Array.isArray(cat) ? cat : cat?.items || []);
+    } catch (e) {
+      snackbar.error(e.message || "No se pudo actualizar categorías.");
+    }
+  }, [snackbar]);
+
   const filteredProducts = useMemo(() => {
     if (!selectedCategory) return products;
     return products.filter((p) => String(p.categoriaProductoId || "") === String(selectedCategory));
@@ -112,7 +113,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
       descripcion: "",
       precioVenta: "",
       precioCompra: "",
-      categoriaProductoId: categories[0]?.id || "",
+      categoriaProductoId: selectedCategory || categories[0]?.id || "",
       proveedorId: providers[0]?.id || "",
       stock: "",
       stockMinimo: "",
@@ -205,79 +206,14 @@ export function ProductsView({ currencySymbol = "C$" }) {
     }
   };
 
-  const openCategoriesModal = () => {
-    setCategoryForm({ id: null, nombre: "", descripcion: "", colorHex: "#3B82F6", iconoNombre: "", orden: 1, activo: true });
-    setCategoriesModalOpen(true);
+  const categoriaRequiereCocina = (c) => {
+    const v = c?.requiereCocina ?? c?.RequiereCocina;
+    return v !== false;
   };
 
   const openProvidersModal = () => {
     setProviderForm({ id: null, nombre: "", telefono: "", email: "", direccion: "", contacto: "", observaciones: "", activo: true });
     setProvidersModalOpen(true);
-  };
-
-  const editCategory = async (id) => {
-    setSaving(true);
-    setError("");
-    try {
-      const c = await backofficeApi.getCategoriaProducto(id);
-      setCategoryForm({
-        id: c.id,
-        nombre: c.nombre || "",
-        descripcion: c.descripcion || "",
-        colorHex: c.colorHex || "#3B82F6",
-        iconoNombre: c.iconoNombre || "",
-        orden: c.orden || 1,
-        activo: c.activo !== false,
-      });
-      setCategoriesModalOpen(true);
-    } catch (e) {
-      setError(e.message || "No se pudo cargar categoria.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveCategory = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    setError("");
-    try {
-      const body = {
-        nombre: categoryForm.nombre,
-        descripcion: categoryForm.descripcion || null,
-        colorHex: categoryForm.colorHex || "#3B82F6",
-        iconoNombre: categoryForm.iconoNombre || null,
-        orden: Number(categoryForm.orden || 1),
-        activo: Boolean(categoryForm.activo),
-      };
-      if (categoryForm.id) await backofficeApi.updateCategoriaProducto(categoryForm.id, body);
-      else await backofficeApi.createCategoriaProducto(body);
-      const cat = await backofficeApi.catalogoCategoriasProducto();
-      setCategories(Array.isArray(cat) ? cat : cat?.items || []);
-      setCategoryForm({ id: null, nombre: "", descripcion: "", colorHex: "#3B82F6", iconoNombre: "", orden: 1, activo: true });
-      snackbar.success("Categoria guardada.");
-    } catch (e2) {
-      setError(e2.message || "No se pudo guardar categoria.");
-      snackbar.error(e2.message || "No se pudo guardar categoria.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const removeCategory = async (id) => {
-    setSaving(true);
-    setError("");
-    try {
-      await backofficeApi.deleteCategoriaProducto(id);
-      const cat = await backofficeApi.catalogoCategoriasProducto();
-      setCategories(Array.isArray(cat) ? cat : cat?.items || []);
-      snackbar.success("Categoria desactivada.");
-    } catch (e) {
-      setError(e.message || "No se pudo eliminar categoria.");
-      snackbar.error(e.message || "No se pudo eliminar categoria.");
-    } finally {
-      setSaving(false);
-    }
   };
 
   const editProvider = async (id) => {
@@ -474,6 +410,28 @@ export function ProductsView({ currencySymbol = "C$" }) {
       </>
     );
   }
+
+  if (categoriesScreen) {
+    return (
+      <ProductCategoriesView
+        onBackToProducts={() => setCategoriesScreen(false)}
+        onOpenProducts={async (categoriaId) => {
+          setCategoriesScreen(false);
+          const id = categoriaId ? String(categoriaId) : "";
+          setSelectedCategory(id);
+          try {
+            await loadProducts(id);
+            await reloadCategoriesOnly();
+          } catch (e) {
+            setError(e.message || "No se pudo cargar productos.");
+            snackbar.error(e.message || "No se pudo cargar productos.");
+          }
+        }}
+        onCategoriesMutated={reloadCategoriesOnly}
+      />
+    );
+  }
+
   return (
     <>
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
@@ -520,7 +478,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
             <Download className="h-3.5 w-3.5" />
             Exportar Excel
           </button>
-          <button onClick={openCategoriesModal} className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-700">Categorías</button>
+          <button type="button" onClick={() => setCategoriesScreen(true)} className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-700">Categorías</button>
           <button onClick={openProvidersModal} className="rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-700">Proveedores</button>
         </div>
         </div>
@@ -606,9 +564,16 @@ export function ProductsView({ currencySymbol = "C$" }) {
                 Categoría
                 <select value={form.categoriaProductoId} onChange={(e) => setForm((f) => ({ ...f, categoriaProductoId: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" required>
                   <option value="">Selecciona categoría</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.nombre || c.descripcion || `Categoria ${c.id}`}</option>
-                  ))}
+                  {categories.map((c) => {
+                    const label = c.nombre || c.descripcion || `Categoria ${c.id}`;
+                    const cocina = categoriaRequiereCocina(c);
+                    return (
+                      <option key={c.id} value={c.id}>
+                        {label}
+                        {cocina ? "" : " — solo barra (no cocina)"}
+                      </option>
+                    );
+                  })}
                 </select>
               </label>
               <label className="text-xs font-semibold text-slate-600">
@@ -745,43 +710,6 @@ export function ProductsView({ currencySymbol = "C$" }) {
         </div>
       )}
 
-      {categoriesModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-3 sm:items-center sm:p-4">
-          <div className="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl max-h-[92vh] overflow-y-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">Categorías</h3>
-              <button onClick={() => setCategoriesModalOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Cerrar</button>
-            </div>
-            <form onSubmit={saveCategory} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-              <input value={categoryForm.nombre} onChange={(e) => setCategoryForm((f) => ({ ...f, nombre: e.target.value }))} placeholder="Nombre" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" required />
-              <input value={categoryForm.descripcion} onChange={(e) => setCategoryForm((f) => ({ ...f, descripcion: e.target.value }))} placeholder="Descripcion" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-              <input value={categoryForm.colorHex} onChange={(e) => setCategoryForm((f) => ({ ...f, colorHex: e.target.value }))} placeholder="#3B82F6" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-              <input value={categoryForm.iconoNombre} onChange={(e) => setCategoryForm((f) => ({ ...f, iconoNombre: e.target.value }))} placeholder="Icono" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-              <input type="number" min="1" value={categoryForm.orden} onChange={(e) => setCategoryForm((f) => ({ ...f, orden: e.target.value }))} placeholder="Orden" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-              <label className="inline-flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={categoryForm.activo} onChange={(e) => setCategoryForm((f) => ({ ...f, activo: e.target.checked }))} /> Activo</label>
-              <div className="md:col-span-3 flex justify-end gap-2">
-                <button type="button" onClick={() => setCategoryForm({ id: null, nombre: "", descripcion: "", colorHex: "#3B82F6", iconoNombre: "", orden: 1, activo: true })} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Limpiar</button>
-                <button disabled={saving} className="rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white">{saving ? "Guardando..." : "Guardar categoría"}</button>
-              </div>
-            </form>
-            <div className="mt-4 max-h-[45vh] space-y-2 overflow-auto">
-              {categories.map((c) => (
-                <div key={c.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">{c.nombre}</p>
-                    <p className="text-xs text-slate-500">{c.descripcion || "Sin descripcion"}</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => editCategory(c.id)} className="rounded-md bg-blue-500 px-2 py-1 text-[11px] font-semibold text-white">Editar</button>
-                    <button onClick={() => setConfirmAction({ open: true, type: "category", id: c.id, name: c.nombre || "Categoría" })} className="rounded-md bg-red-500 px-2 py-1 text-[11px] font-semibold text-white">Eliminar</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       {providersModalOpen && (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/35 p-3 sm:items-center sm:p-4">
           <div className="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl max-h-[92vh] overflow-y-auto">
@@ -824,18 +752,15 @@ export function ProductsView({ currencySymbol = "C$" }) {
         onClose={() => setConfirmAction({ open: false, type: "", id: null, name: "" })}
         onConfirm={async () => {
           if (confirmAction.type === "product" && confirmAction.id) await removeProduct(confirmAction.id, confirmAction.name);
-          if (confirmAction.type === "category" && confirmAction.id) await removeCategory(confirmAction.id);
           if (confirmAction.type === "provider" && confirmAction.id) await removeProvider(confirmAction.id);
         }}
         title="Confirmar eliminación"
         message={
           confirmAction.type === "product"
             ? `¿Eliminar producto "${confirmAction.name}"?`
-            : confirmAction.type === "category"
-              ? "¿Desactivar categoria?"
-              : confirmAction.type === "provider"
-                ? "¿Desactivar proveedor?"
-                : "¿Confirmas esta acción?"
+            : confirmAction.type === "provider"
+              ? "¿Desactivar proveedor?"
+              : "¿Confirmas esta acción?"
         }
         confirmLabel="Eliminar"
         variant="danger"
