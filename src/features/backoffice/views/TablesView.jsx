@@ -1654,17 +1654,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                       <div className="flex justify-between"><span>Total</span><span className="font-bold">{formatCurrency(posSubtotal, currencySymbol)}</span></div>
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-1.5 border-t border-slate-200 pt-2">
-                      {posOrderId && (
-                        <button
-                          type="button"
-                          onClick={() => void openMoveOrderDialog()}
-                          disabled={posActionBusy}
-                          className="col-span-2 inline-flex items-center justify-center gap-1 rounded-sm border border-violet-300 bg-violet-50 px-2 py-2 text-[11px] font-semibold text-violet-900 disabled:opacity-60"
-                        >
-                          <ArrowRightLeft className="h-3.5 w-3.5 shrink-0" />
-                          Trasladar pedido
-                        </button>
-                      )}
                       <button type="button" onClick={handleCancelarPos} disabled={posActionBusy} className="inline-flex items-center justify-center gap-1 rounded-sm bg-red-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
                         <XCircle className="h-3.5 w-3.5" />
                         Cancelar
@@ -1687,15 +1676,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
 
                 {(posCart.length === 0 && posOrderId) && (
                   <div className="mt-3 grid grid-cols-2 gap-1.5 border-t border-slate-200 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => void openMoveOrderDialog()}
-                      disabled={posActionBusy}
-                      className="col-span-2 inline-flex items-center justify-center gap-1 rounded-sm border border-violet-300 bg-violet-50 px-2 py-2 text-[11px] font-semibold text-violet-900 disabled:opacity-60"
-                    >
-                      <ArrowRightLeft className="h-3.5 w-3.5 shrink-0" />
-                      Trasladar pedido
-                    </button>
                     <button type="button" onClick={handleCancelarPos} disabled={posActionBusy} className="inline-flex items-center justify-center gap-1 rounded-sm bg-red-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
                       <XCircle className="h-3.5 w-3.5" />
                       Cancelar
@@ -1775,7 +1755,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                               value={item.notas ?? ""}
                               onChange={(e) => updateCartNotas(item.lineId, e.target.value)}
                               disabled={posActionBusy}
-                              placeholder="nota adicional"
+                              placeholder="Nota adicional"
                               className="box-border w-full min-w-0 rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] text-slate-800 placeholder:text-slate-400"
                             />
                           </td>
@@ -1831,17 +1811,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
 
               {(posCart.length > 0 || posOrderId) && (
                 <div className="mt-3 flex flex-wrap items-center justify-end gap-1.5 border-t border-slate-200 pt-2">
-                  {posOrderId && (
-                    <button
-                      type="button"
-                      onClick={() => void openMoveOrderDialog()}
-                      disabled={posActionBusy}
-                      className="inline-flex items-center gap-1 rounded-sm border border-violet-300 bg-violet-50 px-3 py-1.5 text-[11px] font-semibold text-violet-900 disabled:opacity-60"
-                    >
-                      <ArrowRightLeft className="h-3.5 w-3.5 shrink-0" />
-                      Trasladar pedido
-                    </button>
-                  )}
                   <button type="button" onClick={handleCancelarPos} disabled={posActionBusy} className="inline-flex items-center gap-1 rounded-sm bg-red-500 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60">
                     <XCircle className="h-3.5 w-3.5" />
                     Cancelar
