@@ -1,3 +1,42 @@
+import {
+  normalizeOpcionesSeleccionadas,
+  opcionesResumenSoloTextoOpcion,
+  opcionesSeleccionadasKey,
+  withOpcionesSeleccionadas,
+} from "./productoOpciones.js";
+
+/** Líneas del carrito POS → cuerpo `productos` de POST /pos/ordenes. */
+export function posCartToPosOrdenProductos(cart) {
+  const list = Array.isArray(cart) ? cart : [];
+  return list.map((x) =>
+    withOpcionesSeleccionadas(
+      {
+        productoId: Number(x.id),
+        cantidad: Number(x.qty),
+        notas: String(x.notas ?? "").trim(),
+      },
+      x.opcionesSeleccionadas
+    )
+  );
+}
+
+/** Líneas del carrito POS → `items` de PUT pedido (servicioId como en el backend actual). */
+export function posCartToPedidoItemsPayload(cart) {
+  const list = Array.isArray(cart) ? cart : [];
+  return list.map((x) =>
+    withOpcionesSeleccionadas(
+      {
+        servicioId: Number(x.id),
+        cantidad: Number(x.qty),
+        precioUnitario: Number(x.price || 0),
+        estado: "Listo",
+        notas: String(x.notas ?? "").trim(),
+      },
+      x.opcionesSeleccionadas
+    )
+  );
+}
+
 /** Respuesta API envuelta { data } | { Data } o cuerpo plano. */
 export function unwrapEnvelope(raw) {
   if (raw == null) return raw;
@@ -44,6 +83,11 @@ export function mapBackendItemsToCart(items) {
   const list = Array.isArray(items) ? items : [];
   return list
     .map((it, idx) => {
+      const opcionesSeleccionadas = normalizeOpcionesSeleccionadas(
+        it?.opcionesSeleccionadas ?? it?.OpcionesSeleccionadas
+      );
+      const opcionesKey = opcionesSeleccionadasKey(opcionesSeleccionadas);
+
       const productoId =
         it?.productoId ??
         it?.ProductoId ??
@@ -53,8 +97,13 @@ export function mapBackendItemsToCart(items) {
         it?.Producto?.Id ??
         it?.servicio?.id ??
         it?.Servicio?.Id ??
-        it?.id ??
         idx;
+
+      const backendLineId = it?.id ?? it?.Id;
+      const lineId =
+        backendLineId != null && backendLineId !== ""
+          ? `b-${String(backendLineId)}`
+          : `b-${idx}-${String(productoId)}-${opcionesKey || "x"}`;
 
       const qty = Number(it?.cantidad ?? it?.Cantidad ?? it?.qty ?? 0);
       const montoLinea = Number(it?.monto ?? it?.Monto ?? it?.total ?? it?.Total ?? it?.importe ?? it?.Importe ?? 0);
@@ -79,11 +128,19 @@ export function mapBackendItemsToCart(items) {
         it?.Producto ??
         "Producto";
 
+      const opcionesResumen = opcionesResumenSoloTextoOpcion(it?.opcionesResumen ?? it?.OpcionesResumen ?? "");
+      const notas = String(it?.notas ?? it?.Notas ?? "").trim();
+
       return {
+        lineId,
         id: Number.isNaN(Number(productoId)) ? idx : Number(productoId),
         name: String(name),
         price: Number.isFinite(computedPrice) ? computedPrice : 0,
         qty: qty > 0 ? qty : 0,
+        opcionesSeleccionadas,
+        opcionesKey,
+        opcionesResumen,
+        notas,
       };
     })
     .filter((x) => x.qty > 0);
@@ -91,13 +148,19 @@ export function mapBackendItemsToCart(items) {
 
 /** Líneas para modal de cobro / pre-cuenta local (mismo shape que espera el POS). */
 export function posCartToModalLines(cart) {
-  return cart.map((x) => ({
-    id: x.id,
-    name: x.name,
-    qty: x.qty,
-    price: x.price,
-    lineTotal: Number(x.price || 0) * Number(x.qty || 0),
-  }));
+  return cart.map((x) => {
+    const resumen = opcionesResumenSoloTextoOpcion(x.opcionesResumen ?? "");
+    const note = String(x.notas ?? "").trim();
+    let name = resumen ? `${x.name} — ${resumen}` : x.name;
+    if (note) name = `${name} · ${note}`;
+    return {
+      id: x.lineId ?? x.id,
+      name,
+      qty: x.qty,
+      price: x.price,
+      lineTotal: Number(x.price || 0) * Number(x.qty || 0),
+    };
+  });
 }
 
 export function getPedidoMontoNumeric(pedido) {

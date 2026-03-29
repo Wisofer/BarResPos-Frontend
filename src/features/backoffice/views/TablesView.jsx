@@ -14,7 +14,14 @@ import {
   XCircle,
 } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
-import { BackofficeDialog, ListSkeleton, PosProcesarVentaModal, StatCardsSkeleton } from "../components/index.js";
+import {
+  BackofficeDialog,
+  ListSkeleton,
+  PosInlineOpcionesPanel,
+  PosProductOpcionesModal,
+  PosProcesarVentaModal,
+  StatCardsSkeleton,
+} from "../components/index.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
 import { PAGINATION } from "../constants/pagination.js";
@@ -31,6 +38,8 @@ import {
   mapBackendItemsToCart,
   normalizeApiErrorMessage,
   posCartToModalLines,
+  posCartToPedidoItemsPayload,
+  posCartToPosOrdenProductos,
   unwrapEnvelope,
 } from "../utils/posPedido.js";
 import { isAdminUser } from "../utils/auth.js";
@@ -44,6 +53,18 @@ import {
   TablesMesasStatsBar,
   TablesMesasZonesGrid,
 } from "../tables/index.js";
+import {
+  buildOpcionesResumenLocal,
+  genPosLineId,
+  getSingleGrupoOpcionesForPosInline,
+  normalizeOpcionesGrupos,
+  normalizeOpcionesSeleccionadas,
+  opcionesSeleccionadasKey,
+  posLineMergeKey,
+  productoTieneOpcionesVisibles,
+  sumarPrecioAdicionalOpciones,
+  withOpcionesNormalizadas,
+} from "../utils/productoOpciones.js";
 
 export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   const snackbar = useSnackbar();
@@ -96,6 +117,8 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   const [confirmDeleteLocation, setConfirmDeleteLocation] = useState({ open: false, id: null, name: "" });
   const [showInactiveLocations, setShowInactiveLocations] = useState(false);
   const [cajaAbierta, setCajaAbierta] = useState(true);
+  const [posOpcionesModal, setPosOpcionesModal] = useState({ open: false, product: null });
+  const [posInlineOpcionesProduct, setPosInlineOpcionesProduct] = useState(null);
   const [moveOrderOpen, setMoveOrderOpen] = useState(false);
   const [moveOrderTargetId, setMoveOrderTargetId] = useState("");
   const [moveOrderCandidates, setMoveOrderCandidates] = useState([]);
@@ -424,10 +447,17 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     setPosCategory("");
     setPosCart([]);
     setPosMobileTab("products");
+    setPosInlineOpcionesProduct(null);
+    setPosOpcionesModal({ open: false, product: null });
     try {
       const [orderActiva, productsData, categoriesData] = await Promise.all([
         backofficeApi.getMesaOrdenActiva(table.id).catch(() => null),
-        backofficeApi.listProductos({ page: 1, pageSize: PAGINATION.POS_PRODUCTOS, activos: true }),
+        backofficeApi.listProductos({
+          page: 1,
+          pageSize: PAGINATION.POS_PRODUCTOS,
+          activos: true,
+          incluirOpciones: true,
+        }),
         backofficeApi.catalogoCategoriasProducto(),
       ]);
       const orderActive = unwrapEnvelope(orderActiva);
@@ -488,10 +518,29 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     });
   }, [posProducts, posCategory, posSearch]);
 
-  const rollbackPosLineQty = (productId, cantidad) => {
+  const posInlineOpcionesPick = useMemo(
+    () => (posInlineOpcionesProduct ? getSingleGrupoOpcionesForPosInline(posInlineOpcionesProduct) : null),
+    [posInlineOpcionesProduct]
+  );
+
+  useEffect(() => {
+    if (posInlineOpcionesProduct && !posInlineOpcionesPick) {
+      setPosInlineOpcionesProduct(null);
+    }
+  }, [posInlineOpcionesProduct, posInlineOpcionesPick]);
+
+  const posProductGridClassMobile =
+    "grid auto-rows-min grid-cols-2 gap-2 overflow-auto content-start items-stretch";
+  const posProductGridClassDesktop =
+    "grid auto-rows-min grid-cols-2 gap-2 overflow-auto content-start items-stretch xl:grid-cols-3";
+  const posProductTileShell =
+    "flex min-h-[96px] w-full flex-col justify-end gap-0.5 rounded-md border border-slate-200 bg-gradient-to-b from-slate-200 to-slate-500 px-2 py-2 text-left text-[10px] font-semibold leading-tight text-white shadow-sm sm:min-h-[104px] disabled:cursor-not-allowed disabled:opacity-60";
+
+  const rollbackPosLineByLineId = (lineId, cantidad) => {
+    if (lineId == null || lineId === "") return;
     setPosCart((prev) => {
       const next = [...prev];
-      const idx = next.findIndex((x) => x.id === productId);
+      const idx = next.findIndex((x) => x.lineId === lineId);
       if (idx < 0) return prev;
       const currentQty = Number(next[idx].qty || 0);
       const newQty = Math.max(0, currentQty - Number(cantidad || 1));
@@ -501,20 +550,25 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     });
   };
 
-  const syncPosDeltaAdd = (product, cantidad = 1) => {
+  const syncPosDeltaAdd = (product, cantidad = 1, opcionesSeleccionadas = [], notas = "", rollbackLineId = null) => {
     if (!posTable) return;
     if (!cajaAbierta) return;
     if (posActionBusy) return;
+
+    const opsNorm = normalizeOpcionesSeleccionadas(opcionesSeleccionadas);
+    const notasTrim = String(notas ?? "").trim();
 
     posSyncPendingCountRef.current += 1;
     posSyncChainRef.current = posSyncChainRef.current
       .then(async () => {
         const currentId = posOrderIdRef.current;
+        const pid = Number(product?.id ?? product?.Id);
+        const line = withOpcionesNormalizadas({ productoId: pid, cantidad, notas: notasTrim }, opsNorm);
         const body = {
           mesaId: Number(posTable.id),
           ordenId: currentId ?? undefined,
           observaciones: "",
-          productos: [{ productoId: Number(product.id), cantidad, notas: "" }],
+          productos: [line],
         };
         try {
           const data = await backofficeApi.posOrdenes(body);
@@ -533,7 +587,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
           }
           await refreshPosTableFromBackend(posTable.id);
         } catch (e) {
-          rollbackPosLineQty(product.id, cantidad);
+          rollbackPosLineByLineId(rollbackLineId, cantidad);
           const msg = e?.message || "No se pudo agregar el producto en backend.";
           const status = e?.status;
           const normalized = normalizeApiErrorMessage(msg);
@@ -566,32 +620,133 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
         return;
       }
     }
+    if (productoTieneOpcionesVisibles(product)) {
+      if (getSingleGrupoOpcionesForPosInline(product)) {
+        setPosInlineOpcionesProduct(product);
+        return;
+      }
+      setPosOpcionesModal({ open: true, product });
+      return;
+    }
+    const pid = Number(product?.id ?? product?.Id);
+    const emptyKey = "";
+    const mergeTarget = posLineMergeKey([], "");
+    const syncPayloadRef = { current: { ops: [], notas: "", rollbackLineId: null } };
+
     setPosCart((prev) => {
-      const idx = prev.findIndex((x) => x.id === product.id);
+      const idx = prev.findIndex(
+        (x) => Number(x.id) === pid && posLineMergeKey(x.opcionesSeleccionadas, x.notas) === mergeTarget
+      );
       if (idx >= 0) {
+        const line = prev[idx];
+        syncPayloadRef.current = {
+          ops: normalizeOpcionesSeleccionadas(line.opcionesSeleccionadas),
+          notas: String(line.notas ?? "").trim(),
+          rollbackLineId: line.lineId,
+        };
         const copy = [...prev];
         copy[idx] = { ...copy[idx], qty: copy[idx].qty + 1 };
         return copy;
       }
-      return [...prev, { id: product.id, name: product.nombre || "Producto", price: Number(product.precio || 0), qty: 1 }];
+      const nextLineId = genPosLineId();
+      syncPayloadRef.current = { ops: [], notas: "", rollbackLineId: nextLineId };
+      return [
+        ...prev,
+        {
+          lineId: nextLineId,
+          id: pid,
+          name: product.nombre || product.Nombre || "Producto",
+          price: Number(product.precio ?? product.Precio ?? 0),
+          qty: 1,
+          opcionesSeleccionadas: [],
+          opcionesKey: emptyKey,
+          opcionesResumen: "",
+          notas: "",
+        },
+      ];
     });
 
-    // Actualiza la orden activa en backend para reflejar ocupación en tiempo real.
-    void syncPosDeltaAdd(product, 1);
+    const { ops, notas, rollbackLineId } = syncPayloadRef.current;
+    void syncPosDeltaAdd(product, 1, ops, notas, rollbackLineId);
   };
 
-  const updateCartQty = (productId, delta) => {
+  const pickPosInlineOpcion = (prod, grupoId, opcion) => {
+    const oid = Number(opcion?.id ?? opcion?.Id);
+    if (!Number.isFinite(oid) || !Number.isFinite(Number(grupoId))) return;
+    if (posActionBusy || !cajaAbierta) return;
+    setPosInlineOpcionesProduct(null);
+    confirmAddProductWithOpciones(prod, [{ grupoId: Number(grupoId), opcionId: oid }]);
+  };
+
+  const confirmAddProductWithOpciones = (product, opcionesSeleccionadas) => {
+    const pid = Number(product?.id ?? product?.Id);
+    const grupos = normalizeOpcionesGrupos(product);
+    const opsNorm = normalizeOpcionesSeleccionadas(opcionesSeleccionadas);
+    const key = opcionesSeleccionadasKey(opsNorm);
+    const extra = sumarPrecioAdicionalOpciones(grupos, opsNorm);
+    const base = Number(product.precio ?? product.Precio ?? 0);
+    const resumen = buildOpcionesResumenLocal(grupos, opsNorm);
+    const mergeTarget = posLineMergeKey(opsNorm, "");
+    const syncPayloadRef = { current: { ops: opsNorm, notas: "", rollbackLineId: null } };
+
+    setPosCart((prev) => {
+      const idx = prev.findIndex(
+        (x) => Number(x.id) === pid && posLineMergeKey(x.opcionesSeleccionadas, x.notas) === mergeTarget
+      );
+      if (idx >= 0) {
+        const line = prev[idx];
+        syncPayloadRef.current = {
+          ops: normalizeOpcionesSeleccionadas(line.opcionesSeleccionadas),
+          notas: String(line.notas ?? "").trim(),
+          rollbackLineId: line.lineId,
+        };
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], qty: copy[idx].qty + 1 };
+        return copy;
+      }
+      const nextLineId = genPosLineId();
+      syncPayloadRef.current = { ops: opsNorm, notas: "", rollbackLineId: nextLineId };
+      return [
+        ...prev,
+        {
+          lineId: nextLineId,
+          id: pid,
+          name: product.nombre || product.Nombre || "Producto",
+          price: base + extra,
+          qty: 1,
+          opcionesSeleccionadas: opsNorm,
+          opcionesKey: key,
+          opcionesResumen: resumen,
+          notas: "",
+        },
+      ];
+    });
+
+    const { ops, notas, rollbackLineId } = syncPayloadRef.current;
+    void syncPosDeltaAdd(product, 1, ops, notas, rollbackLineId);
+  };
+
+  const updateCartQty = (lineId, delta) => {
     setPosCart((prev) => {
       const next = prev
-        .map((item) => (item.id === productId ? { ...item, qty: Math.max(0, Number(item.qty || 0) + delta) } : item))
+        .map((item) =>
+          item.lineId === lineId ? { ...item, qty: Math.max(0, Number(item.qty || 0) + delta) } : item
+        )
         .filter((item) => item.qty > 0);
       return next;
     });
     setPosCommitted(false);
   };
 
-  const removeFromCart = (productId) => {
-    setPosCart((prev) => prev.filter((item) => item.id !== productId));
+  const removeFromCart = (lineId) => {
+    setPosCart((prev) => prev.filter((item) => item.lineId !== lineId));
+    setPosCommitted(false);
+  };
+
+  const updateCartNotas = (lineId, notas) => {
+    setPosCart((prev) =>
+      prev.map((item) => (item.lineId === lineId ? { ...item, notas: String(notas ?? "") } : item))
+    );
     setPosCommitted(false);
   };
 
@@ -637,6 +792,8 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   const closePosView = () => {
     posSyncChainRef.current = Promise.resolve();
     posSyncPendingCountRef.current = 0;
+    setPosOpcionesModal({ open: false, product: null });
+    setPosInlineOpcionesProduct(null);
     setPosOpen(false);
     setPosTable(null);
     setPosOrderId(null);
@@ -907,11 +1064,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     try {
       // Aseguramos que exista la orden activa (si por algún motivo no existe aún).
       if (!posOrderId) {
-        const productos = posCart.map((x) => ({
-          productoId: Number(x.id),
-          cantidad: Number(x.qty),
-          notas: "",
-        }));
+        const productos = posCartToPosOrdenProductos(posCart);
         const data = await backofficeApi.posOrdenes({
           mesaId: Number(posTable.id),
           ordenId: undefined,
@@ -928,13 +1081,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
 
       // PUT reemplaza items: así queda 1:1 con el carrito (incluye +/-).
       const pedido = await backofficeApi.getPedido(currentId);
-      const items = posCart.map((x) => ({
-        servicioId: Number(x.id),
-        cantidad: Number(x.qty),
-        precioUnitario: Number(x.price || 0),
-        estado: "Listo",
-        notas: "",
-      }));
+      const items = posCartToPedidoItemsPayload(posCart);
 
       await backofficeApi.updatePedido(currentId, {
         mesaId: pedido?.mesaId ?? pedido?.MesaId ?? Number(posTable.id),
@@ -1392,29 +1539,49 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
           <div className="min-h-0 flex-1 lg:hidden">
             {posMobileTab === "products" ? (
               <article className="h-full rounded-md border border-slate-300 bg-white p-3">
-                <input
-                  value={posSearch}
-                  onChange={(e) => setPosSearch(e.target.value)}
-                  placeholder="Búsqueda de productos"
-                  className="mb-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                />
-                {posLoading ? (
-                  <ListSkeleton rows={4} />
+                {posInlineOpcionesPick && posInlineOpcionesProduct ? (
+                  <PosInlineOpcionesPanel
+                    product={posInlineOpcionesProduct}
+                    grupoId={posInlineOpcionesPick.grupoId}
+                    opciones={posInlineOpcionesPick.opciones}
+                    onPickOpcion={pickPosInlineOpcion}
+                    onBack={() => setPosInlineOpcionesProduct(null)}
+                    currencySymbol={currencySymbol}
+                    disabled={posActionBusy || !cajaAbierta}
+                    gridClassName={`max-h-[55vh] ${posProductGridClassMobile}`}
+                    tileClassName={posProductTileShell}
+                  />
                 ) : (
-                  <div className="grid max-h-[55vh] grid-cols-2 gap-2 overflow-auto">
-                    {filteredPosProducts.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => addProductToCart(p)}
-                        disabled={posActionBusy || !cajaAbierta}
-                        className="flex min-h-[92px] items-end rounded-md border border-slate-200 bg-gradient-to-b from-slate-200 to-slate-500 px-2 py-2 text-left text-[10px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {String(p.nombre || "Producto").toUpperCase()}
-                      </button>
-                    ))}
-                    {filteredPosProducts.length === 0 && <p className="col-span-2 py-8 text-center text-xs text-slate-500">Sin productos para mostrar.</p>}
-                  </div>
+                  <>
+                    <input
+                      value={posSearch}
+                      onChange={(e) => setPosSearch(e.target.value)}
+                      placeholder="Búsqueda de productos"
+                      className="mb-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    />
+                    {posLoading ? (
+                      <ListSkeleton rows={4} />
+                    ) : (
+                      <div className={`max-h-[55vh] ${posProductGridClassMobile}`}>
+                        {filteredPosProducts.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => addProductToCart(p)}
+                            disabled={posActionBusy || !cajaAbierta}
+                            className={posProductTileShell}
+                          >
+                            <span className="line-clamp-4 break-words drop-shadow-sm">
+                              {String(p.nombre || "Producto").toUpperCase()}
+                            </span>
+                          </button>
+                        ))}
+                        {filteredPosProducts.length === 0 && (
+                          <p className="col-span-2 py-8 text-center text-xs text-slate-500">Sin productos para mostrar.</p>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </article>
             ) : (
@@ -1427,14 +1594,27 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                     <>
                       {posCart.length === 0 && <p className="py-8 text-center text-xs text-slate-500">Sin productos en la orden.</p>}
                       {posCart.map((item) => (
-                        <div key={item.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                        <div key={item.lineId} className="rounded-lg border border-slate-200 bg-slate-50 p-2">
                           <div className="flex items-start justify-between gap-2">
-                            <p className="text-xs font-semibold text-slate-800">{item.name}</p>
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-slate-800">{item.name}</p>
+                              {item.opcionesResumen ? (
+                                <p className="mt-0.5 text-[10px] leading-snug text-slate-500">{item.opcionesResumen}</p>
+                              ) : null}
+                              <input
+                                type="text"
+                                value={item.notas ?? ""}
+                                onChange={(e) => updateCartNotas(item.lineId, e.target.value)}
+                                disabled={posActionBusy}
+                                placeholder="Nota adicional"
+                                className="mt-1.5 w-full rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-800 placeholder:text-slate-400"
+                              />
+                            </div>
                             <button
                               type="button"
-                              onClick={() => removeFromCart(item.id)}
+                              onClick={() => removeFromCart(item.lineId)}
                               disabled={posActionBusy}
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-red-200 text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+                              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-red-200 text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -1443,7 +1623,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                             <div className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white p-0.5">
                               <button
                                 type="button"
-                                onClick={() => updateCartQty(item.id, -1)}
+                                onClick={() => updateCartQty(item.lineId, -1)}
                                 disabled={posActionBusy}
                                 className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                               >
@@ -1452,7 +1632,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                               <span className="min-w-5 text-center font-semibold text-slate-800">{item.qty}</span>
                               <button
                                 type="button"
-                                onClick={() => updateCartQty(item.id, 1)}
+                                onClick={() => updateCartQty(item.lineId, 1)}
                                 disabled={posActionBusy}
                                 className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                               >
@@ -1567,6 +1747,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                     <thead className="bg-slate-100 text-left text-slate-600">
                       <tr>
                         <th className="px-2 py-2">Producto</th>
+                        <th className="w-[min(28vw,9rem)] px-1 py-2">Nota</th>
                         <th className="px-2 py-2">CNT</th>
                         <th className="px-2 py-2">P/U</th>
                         <th className="px-2 py-2">PT</th>
@@ -1575,19 +1756,34 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                     <tbody>
                       {posCart.length === 0 && (
                         <tr>
-                          <td colSpan={4} className="px-2 py-6 text-center text-slate-500">
+                          <td colSpan={5} className="px-2 py-6 text-center text-slate-500">
                             Sin productos en la orden.
                           </td>
                         </tr>
                       )}
                       {posCart.map((item) => (
-                        <tr key={item.id} className="border-t border-slate-100">
-                          <td className="px-2 py-2">{item.name}</td>
-                          <td className="px-2 py-2">
+                        <tr key={item.lineId} className="border-t border-slate-100">
+                          <td className="px-2 py-2 align-middle">
+                            <div className="font-medium text-slate-800">{item.name}</div>
+                            {item.opcionesResumen ? (
+                              <div className="mt-0.5 text-[10px] text-slate-500">{item.opcionesResumen}</div>
+                            ) : null}
+                          </td>
+                          <td className="px-1 py-2 align-middle">
+                            <input
+                              type="text"
+                              value={item.notas ?? ""}
+                              onChange={(e) => updateCartNotas(item.lineId, e.target.value)}
+                              disabled={posActionBusy}
+                              placeholder="nota adicional"
+                              className="box-border w-full min-w-0 rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] text-slate-800 placeholder:text-slate-400"
+                            />
+                          </td>
+                          <td className="px-2 py-2 align-middle">
                             <div className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white p-0.5">
                               <button
                                 type="button"
-                                onClick={() => updateCartQty(item.id, -1)}
+                                onClick={() => updateCartQty(item.lineId, -1)}
                                 disabled={posActionBusy}
                                 className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                               >
@@ -1596,7 +1792,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                               <span className="min-w-5 text-center font-semibold text-slate-800">{item.qty}</span>
                               <button
                                 type="button"
-                                onClick={() => updateCartQty(item.id, 1)}
+                                onClick={() => updateCartQty(item.lineId, 1)}
                                 disabled={posActionBusy}
                                 className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                               >
@@ -1604,13 +1800,15 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                               </button>
                             </div>
                           </td>
-                          <td className="px-2 py-2">{formatCurrency(item.price, currencySymbol)}</td>
-                          <td className="px-2 py-2 font-semibold">
+                          <td className="whitespace-nowrap px-2 py-2 align-middle">
+                            {formatCurrency(item.price, currencySymbol)}
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-2 align-middle font-semibold">
                             <div className="flex items-center justify-between gap-2">
                               <span>{formatCurrency(item.price * item.qty, currencySymbol)}</span>
                               <button
                                 type="button"
-                                onClick={() => removeFromCart(item.id)}
+                                onClick={() => removeFromCart(item.lineId)}
                                 disabled={posActionBusy}
                                 className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-red-200 text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
                               >
@@ -1665,33 +1863,66 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
             </article>
 
             <article className="min-h-[340px] rounded-md border border-slate-300 bg-white p-3 lg:min-h-0 lg:h-full">
-              <input
-                value={posSearch}
-                onChange={(e) => setPosSearch(e.target.value)}
-                placeholder="Búsqueda de productos"
-                className="mb-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              />
-              {posLoading ? (
-                <ListSkeleton rows={4} />
+              {posInlineOpcionesPick && posInlineOpcionesProduct ? (
+                <PosInlineOpcionesPanel
+                  product={posInlineOpcionesProduct}
+                  grupoId={posInlineOpcionesPick.grupoId}
+                  opciones={posInlineOpcionesPick.opciones}
+                  onPickOpcion={pickPosInlineOpcion}
+                  onBack={() => setPosInlineOpcionesProduct(null)}
+                  currencySymbol={currencySymbol}
+                  disabled={posActionBusy || !cajaAbierta}
+                  gridClassName={`max-h-[420px] ${posProductGridClassDesktop} lg:h-[calc(100%-5.5rem)] lg:max-h-full`}
+                  tileClassName={posProductTileShell}
+                />
               ) : (
-                <div className="grid max-h-[420px] grid-cols-2 gap-2 overflow-auto lg:h-[calc(100%-2.5rem)] lg:max-h-full xl:grid-cols-3">
-                  {filteredPosProducts.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => addProductToCart(p)}
-                      disabled={posActionBusy || !cajaAbierta}
-                      className="flex min-h-[86px] items-end rounded-md border border-slate-200 bg-gradient-to-b from-slate-200 to-slate-500 px-2 py-2 text-left text-[10px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {String(p.nombre || "Producto").toUpperCase()}
-                    </button>
-                  ))}
-                  {filteredPosProducts.length === 0 && <p className="col-span-2 py-8 text-center text-xs text-slate-500">Sin productos para mostrar.</p>}
-                </div>
+                <>
+                  <input
+                    value={posSearch}
+                    onChange={(e) => setPosSearch(e.target.value)}
+                    placeholder="Búsqueda de productos"
+                    className="mb-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  />
+                  {posLoading ? (
+                    <ListSkeleton rows={4} />
+                  ) : (
+                    <div className={`max-h-[420px] ${posProductGridClassDesktop} lg:h-[calc(100%-2.5rem)] lg:max-h-full`}>
+                      {filteredPosProducts.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => addProductToCart(p)}
+                          disabled={posActionBusy || !cajaAbierta}
+                          className={posProductTileShell}
+                        >
+                          <span className="line-clamp-4 break-words drop-shadow-sm">
+                            {String(p.nombre || "Producto").toUpperCase()}
+                          </span>
+                        </button>
+                      ))}
+                      {filteredPosProducts.length === 0 && (
+                        <p className="col-span-2 py-8 text-center text-xs text-slate-500">Sin productos para mostrar.</p>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </article>
           </div>
         </section>
+
+        <PosProductOpcionesModal
+          open={posOpcionesModal.open}
+          product={posOpcionesModal.product}
+          currencySymbol={currencySymbol}
+          onClose={() => setPosOpcionesModal({ open: false, product: null })}
+          onConfirm={(opcionesSeleccionadas) => {
+            const p = posOpcionesModal.product;
+            setPosOpcionesModal({ open: false, product: null });
+            if (!p) return;
+            confirmAddProductWithOpciones(p, opcionesSeleccionadas);
+          }}
+        />
 
         <PosProcesarVentaModal
           open={saleModalOpen}

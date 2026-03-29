@@ -23,6 +23,10 @@ import { getToken } from "../../../api/token.js";
 import { ProductCategoriesView } from "./ProductCategoriesView.jsx";
 import { PROVIDERS_UPDATED_EVENT } from "../providers/constants.js";
 import { resolveProductCodigoForSave } from "../utils/productCodigo.js";
+import {
+  parseOpcionesEspecialesFromGruposApi,
+  syncOpcionesEspecialesBackend,
+} from "../utils/productoOpcionesEspecialesSync.js";
 
 /** Solo estos productos tienen movimientos de inventario en POS/backend. */
 function tieneControlStock(p) {
@@ -100,6 +104,9 @@ export function ProductsView({ currencySymbol = "C$" }) {
     stockMinimo: "",
     controlarStock: true,
     activo: true,
+    opcionesEspecialesOn: false,
+    opcionesEspecialesLines: [""],
+    opcionesEspecialesGrupoId: null,
   });
   const [stockForm, setStockForm] = useState({
     productoId: "",
@@ -227,6 +234,9 @@ export function ProductsView({ currencySymbol = "C$" }) {
       stockMinimo: "",
       controlarStock: true,
       activo: true,
+      opcionesEspecialesOn: false,
+      opcionesEspecialesLines: [""],
+      opcionesEspecialesGrupoId: null,
     });
     setModalOpen(true);
   };
@@ -348,7 +358,13 @@ export function ProductsView({ currencySymbol = "C$" }) {
     setSaving(true);
     setError("");
     try {
-      const p = await backofficeApi.getProducto(id);
+      const [p, gruposRaw] = await Promise.all([
+        backofficeApi.getProducto(id),
+        backofficeApi.listProductoOpcionesGrupos(id).catch(() => null),
+      ]);
+      const parsed = parseOpcionesEspecialesFromGruposApi(gruposRaw ?? []);
+      const lineas = parsed.lineas.length ? parsed.lineas : [""];
+      const tieneOpciones = lineas.some((s) => String(s || "").trim());
       setForm({
         id: p.id,
         codigo: p.codigo || "",
@@ -362,6 +378,9 @@ export function ProductsView({ currencySymbol = "C$" }) {
         stockMinimo: p.stockMinimo ?? "",
         controlarStock: Boolean(p.controlarStock),
         activo: p.activo !== false,
+        opcionesEspecialesOn: tieneOpciones,
+        opcionesEspecialesLines: lineas,
+        opcionesEspecialesGrupoId: parsed.grupoId,
       });
       setModalOpen(true);
     } catch (e) {
@@ -373,6 +392,13 @@ export function ProductsView({ currencySymbol = "C$" }) {
 
   const saveProduct = async (e) => {
     e.preventDefault();
+    if (
+      form.opcionesEspecialesOn &&
+      !form.opcionesEspecialesLines.some((s) => String(s || "").trim())
+    ) {
+      snackbar.error("Agrega al menos una opción especial o desactiva el interruptor.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -391,11 +417,37 @@ export function ProductsView({ currencySymbol = "C$" }) {
         activo: Boolean(form.activo),
         ...(form.id ? {} : { stock: Number(form.stock || 0) }),
       };
-      if (form.id) await backofficeApi.updateProducto(form.id, body);
-      else await backofficeApi.createProducto(body);
+      let productId = form.id;
+      if (form.id) {
+        await backofficeApi.updateProducto(form.id, body);
+      } else {
+        const created = await backofficeApi.createProducto(body);
+        productId = created?.id ?? created?.Id ?? null;
+      }
+      if (productId == null) throw new Error("No se obtuvo el id del producto.");
+
+      const syncRes = await syncOpcionesEspecialesBackend(backofficeApi, productId, {
+        habilitado: form.opcionesEspecialesOn,
+        nombres: form.opcionesEspecialesLines,
+        grupoIdConocido: form.opcionesEspecialesGrupoId,
+      });
+      if (!syncRes.ok) {
+        if (!syncRes.skipped) {
+          throw new Error(syncRes.error || "No se pudieron guardar las opciones especiales.");
+        }
+      }
+
       await loadProducts(selectedCategory);
       setModalOpen(false);
-      snackbar.success(form.id ? "Producto actualizado." : "Producto creado.");
+      if (!syncRes.ok && syncRes.skipped) {
+        snackbar.success(
+          form.id
+            ? "Producto actualizado. Las opciones no se guardaron (revisa API /opciones o permisos de admin)."
+            : "Producto creado. Las opciones no se guardaron (revisa API /opciones o permisos de admin)."
+        );
+      } else {
+        snackbar.success(form.id ? "Producto actualizado." : "Producto creado.");
+      }
       window.dispatchEvent(new CustomEvent("barrest-inventory-updated"));
     } catch (e2) {
       setError(e2.message || "No se pudo guardar el producto.");
@@ -777,6 +829,85 @@ export function ProductsView({ currencySymbol = "C$" }) {
                   />
                   Activo
                 </label>
+              </div>
+
+              <div className="col-span-full rounded-xl border border-slate-200 bg-slate-50/90 p-3 sm:col-span-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-800">Opciones especiales</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={form.opcionesEspecialesOn}
+                    aria-label={form.opcionesEspecialesOn ? "Desactivar opciones especiales" : "Activar opciones especiales"}
+                    onClick={() =>
+                      setForm((f) => ({
+                        ...f,
+                        opcionesEspecialesOn: !f.opcionesEspecialesOn,
+                        opcionesEspecialesLines:
+                          !f.opcionesEspecialesOn && (!f.opcionesEspecialesLines?.length || f.opcionesEspecialesLines.length === 0)
+                            ? [""]
+                            : f.opcionesEspecialesLines,
+                      }))
+                    }
+                    className={`inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full border border-transparent px-[3px] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1 ${
+                      form.opcionesEspecialesOn ? "justify-end bg-violet-600" : "justify-start bg-slate-300"
+                    }`}
+                  >
+                    <span className="pointer-events-none h-4 w-4 rounded-full bg-white shadow-sm ring-1 ring-black/5" />
+                  </button>
+                </div>
+
+                {form.opcionesEspecialesOn && (
+                  <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
+                    {form.opcionesEspecialesLines.map((line, idx) => (
+                      <div key={idx} className="flex min-w-0 items-start gap-2">
+                        <label className="min-w-0 flex-1 text-[11px] font-semibold text-slate-600">
+                          Opción {idx + 1}
+                          <input
+                            value={line}
+                            onChange={(e) =>
+                              setForm((f) => {
+                                const next = [...f.opcionesEspecialesLines];
+                                next[idx] = e.target.value;
+                                return { ...f, opcionesEspecialesLines: next };
+                              })
+                            }
+                            placeholder="Ej. Barbacoa"
+                            className={productModalFieldClass}
+                            autoComplete="off"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          title="Quitar"
+                          aria-label="Quitar opción"
+                          disabled={form.opcionesEspecialesLines.length <= 1}
+                          onClick={() =>
+                            setForm((f) => {
+                              const next = f.opcionesEspecialesLines.filter((_, j) => j !== idx);
+                              return { ...f, opcionesEspecialesLines: next.length ? next : [""] };
+                            })
+                          }
+                          className="mt-6 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-300 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 sm:mt-5"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm((f) => ({ ...f, opcionesEspecialesLines: [...f.opcionesEspecialesLines, ""] }))
+                      }
+                      className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-violet-300 bg-white px-3 py-2.5 text-xs font-semibold text-violet-800 hover:bg-violet-50 sm:min-h-0 sm:w-auto sm:py-2"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Agregar otra opción
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
             <label className="mt-4 block min-w-0 text-xs font-semibold text-slate-600 sm:mt-3">

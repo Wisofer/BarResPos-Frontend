@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, Package, UserCircle } from "lucide-react";
+import { Bell, Maximize2, Minimize2, Package, UserCircle } from "lucide-react";
 import { displayUserName } from "../../../utils/authUser.js";
 import { cn } from "../../../utils/cn.js";
 
@@ -18,6 +18,7 @@ export function BackofficeShellHeaderActions({
 }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const rootRef = useRef(null);
   const lowStockCount = lowStockItems.length;
 
@@ -35,6 +36,15 @@ export function BackofficeShellHeaderActions({
     };
   }, []);
 
+  useEffect(() => {
+    setIsFullscreen(Boolean(document.fullscreenElement));
+    const onFullscreenChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+    };
+  }, []);
+
   const isTopbar = variant === "topbar";
   const btnBase =
     "relative inline-flex shrink-0 items-center justify-center rounded-full text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 active:scale-[0.98] dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white";
@@ -43,8 +53,30 @@ export function BackofficeShellHeaderActions({
   const panelClass =
     "z-[100] max-h-[min(24rem,75dvh)] w-[min(22rem,calc(100vw-1.25rem))] overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-xl shadow-slate-200/60 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/40";
 
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        const target = document.documentElement;
+        if (target?.requestFullscreen) await target.requestFullscreen();
+      }
+    } catch {
+      // Puede fallar por políticas del navegador o permisos del sistema.
+    }
+  };
+
   return (
     <div ref={rootRef} className={cn("flex shrink-0 items-center gap-0.5 sm:gap-1", isTopbar && "touch-manipulation")}>
+      <button
+        type="button"
+        onClick={() => void toggleFullscreen()}
+        className={cn(btnBase, btnSize, "touch-manipulation")}
+        aria-label={isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
+        title={isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
+      >
+        {isFullscreen ? <Minimize2 className="h-5 w-5" strokeWidth={1.75} /> : <Maximize2 className="h-5 w-5" strokeWidth={1.75} />}
+      </button>
       <div className="relative">
         <button
           type="button"

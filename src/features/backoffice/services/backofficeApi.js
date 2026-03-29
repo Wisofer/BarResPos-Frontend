@@ -38,6 +38,18 @@ export const backofficeApi = {
   createProducto: (body) => api.post("/api/v1/productos", body),
   updateProducto: (id, body) => api.put(`/api/v1/productos/${id}`, body),
   deleteProducto: (id) => api.delete(`/api/v1/productos/${id}`),
+  listProductoOpcionesGrupos: (productoId) => api.get(`/api/v1/productos/${productoId}/opciones/grupos`),
+  createProductoOpcionGrupo: (productoId, body) => api.post(`/api/v1/productos/${productoId}/opciones/grupos`, body),
+  updateProductoOpcionGrupo: (productoId, grupoId, body) =>
+    api.put(`/api/v1/productos/${productoId}/opciones/grupos/${grupoId}`, body),
+  deleteProductoOpcionGrupo: (productoId, grupoId) =>
+    api.delete(`/api/v1/productos/${productoId}/opciones/grupos/${grupoId}`),
+  createProductoOpcionItem: (productoId, grupoId, body) =>
+    api.post(`/api/v1/productos/${productoId}/opciones/grupos/${grupoId}/items`, body),
+  updateProductoOpcionItem: (productoId, grupoId, opcionId, body) =>
+    api.put(`/api/v1/productos/${productoId}/opciones/grupos/${grupoId}/items/${opcionId}`, body),
+  deleteProductoOpcionItem: (productoId, grupoId, opcionId) =>
+    api.delete(`/api/v1/productos/${productoId}/opciones/grupos/${grupoId}/items/${opcionId}`),
   entradaStockProducto: (body) => api.post("/api/v1/productos/entrada-stock", body),
   salidaStockProducto: (body) => api.post("/api/v1/productos/salida-stock", body),
   ajusteStockProducto: (body) => api.post("/api/v1/productos/ajuste-stock", body),
