@@ -150,6 +150,13 @@ export function DashboardView({ currencySymbol = "C$" }) {
   }, [currencySymbol]);
 
   const safeProducts = useMemo(() => topProducts.slice(0, 3), [topProducts]);
+  const statsByTitle = useMemo(() => {
+    const m = new Map();
+    (stats || []).forEach((s) => {
+      if (s?.title) m.set(s.title, s);
+    });
+    return m;
+  }, [stats]);
   const totalIncomeSinceStart = useMemo(
     () => salesSeries.reduce((sum, point) => sum + Number(point.total || 0), 0),
     [salesSeries]
@@ -237,6 +244,27 @@ export function DashboardView({ currencySymbol = "C$" }) {
               </div>
             </div>
           </article>
+
+          <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-amber-500" />
+              <h2 className="text-base font-semibold text-slate-800">Top productos</h2>
+            </div>
+            <div className="space-y-3">
+              {safeProducts.map((product) => (
+                <div key={product.name} className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
+                  <div className="flex items-center gap-2">
+                    <ShoppingBag className="h-4 w-4 text-slate-500" />
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">{product.name}</p>
+                      <p className="text-xs text-slate-500">{product.sold} vendidos</p>
+                    </div>
+                  </div>
+                  <span className="text-sm font-semibold text-slate-700">{product.amount}</span>
+                </div>
+              ))}
+            </div>
+          </article>
         </section>
 
         <article className="space-y-4">
@@ -271,24 +299,24 @@ export function DashboardView({ currencySymbol = "C$" }) {
             </div>
             <p className="mt-2 text-xs text-slate-500">Rango: {rangeLabel}</p>
           </div>
+
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-3 flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-amber-500" />
-              <h2 className="text-base font-semibold text-slate-800">Top productos</h2>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-slate-800">Resumen del día</h2>
+              <ClipboardList className="h-4 w-4 text-slate-400" />
             </div>
-            <div className="space-y-3">
-              {safeProducts.map((product) => (
-                <div key={product.name} className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
-                  <div className="flex items-center gap-2">
-                    <ShoppingBag className="h-4 w-4 text-slate-500" />
-                    <div>
-                      <p className="text-sm font-medium text-slate-700">{product.name}</p>
-                      <p className="text-xs text-slate-500">{product.sold} vendidos</p>
-                    </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {["Ordenes hoy", "Mesas ocupadas", "Ventas hoy", "Ticket promedio"].map((title) => {
+                const s = statsByTitle.get(title);
+                if (!s) return null;
+                return (
+                  <div key={title} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">{title}</p>
+                    <p className="mt-1 text-xl font-bold text-slate-900">{s.value}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{s.detail}</p>
                   </div>
-                  <span className="text-sm font-semibold text-slate-700">{product.amount}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </article>

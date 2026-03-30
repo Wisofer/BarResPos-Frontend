@@ -74,7 +74,7 @@ export function MobileNav({ open, setOpen, activeView, onChangeView, onLogout, s
             className="mt-auto flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
           >
             <LogOut className="h-4 w-4" />
-            {sessionLoading ? "Cerrando..." : "Cerrar sesion"}
+            {sessionLoading ? "Cerrando..." : "Cerrar sesión"}
           </button>
         </div>
       </aside>
