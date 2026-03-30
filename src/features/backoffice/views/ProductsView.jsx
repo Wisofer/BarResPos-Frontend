@@ -516,10 +516,10 @@ export function ProductsView({ currencySymbol = "C$" }) {
 
   if (loading) {
     return (
-      <>
+      <div className="mx-auto min-w-0 max-w-7xl space-y-4">
         <StatCardsSkeleton />
         <ListSkeleton rows={8} />
-      </>
+      </div>
     );
   }
 

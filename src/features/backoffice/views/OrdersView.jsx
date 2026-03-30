@@ -469,7 +469,7 @@ export function OrdersView({ currencySymbol = "C$" }) {
     }, 180);
   };
 
-  if (loading) return <ListSkeleton rows={6} />;
+  if (loading) return <div className="mx-auto min-w-0 max-w-7xl"><ListSkeleton rows={6} /></div>;
 
   if (showDetail && detailOrder) {
     const createdAtLabel = formatDateTimeLabel(detailOrder.fechaCreacion);

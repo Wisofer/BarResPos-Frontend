@@ -188,7 +188,7 @@ export function SettingsView() {
     }
   };
 
-  if (loading) return <ListSkeleton rows={5} />;
+  if (loading) return <div className="mx-auto min-w-0 max-w-7xl"><ListSkeleton rows={5} /></div>;
   const normalizedSettings = settings.filter((s) => String(s?.clave || "").toLowerCase() !== "tipocambiodolar");
   return (
     <div className="min-w-0 max-w-full space-y-4">

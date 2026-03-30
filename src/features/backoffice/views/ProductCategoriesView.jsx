@@ -168,7 +168,7 @@ export function ProductCategoriesView({ onBackToProducts, onOpenProducts, onCate
     }
   };
 
-  if (loading) return <ListSkeleton rows={8} />;
+  if (loading) return <div className="mx-auto min-w-0 max-w-7xl"><ListSkeleton rows={8} /></div>;
 
   return (
     <div className="space-y-4">

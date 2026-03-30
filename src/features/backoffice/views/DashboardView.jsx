@@ -154,7 +154,14 @@ export function DashboardView({ currencySymbol = "C$" }) {
     () => salesSeries.reduce((sum, point) => sum + Number(point.total || 0), 0),
     [salesSeries]
   );
-  if (loading) return <><StatCardsSkeleton /><ListSkeleton rows={4} /></>;
+  if (loading) {
+    return (
+      <div className="mx-auto min-w-0 max-w-7xl space-y-4">
+        <StatCardsSkeleton />
+        <ListSkeleton rows={4} />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto min-w-0 max-w-7xl space-y-4">

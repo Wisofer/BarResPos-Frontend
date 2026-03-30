@@ -113,7 +113,7 @@ export function CashierView({ currencySymbol = "C$" }) {
     }
   };
 
-  if (loading) return <ListSkeleton rows={5} />;
+  if (loading) return <div className="mx-auto min-w-0 max-w-7xl"><ListSkeleton rows={5} /></div>;
   const totalEfectivo =
     preview?.totales?.efectivo ??
     preview?.totales?.totalEfectivo ??

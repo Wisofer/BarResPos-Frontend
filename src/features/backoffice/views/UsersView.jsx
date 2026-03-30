@@ -125,7 +125,7 @@ export function UsersView() {
     }
   };
 
-  if (loading) return <ListSkeleton rows={6} />;
+  if (loading) return <div className="mx-auto min-w-0 max-w-7xl"><ListSkeleton rows={6} /></div>;
   return (
     <>
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}

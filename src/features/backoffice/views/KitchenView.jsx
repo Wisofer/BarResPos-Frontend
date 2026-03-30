@@ -137,7 +137,7 @@ export function KitchenView() {
     return base;
   }, [filtered]);
 
-  if (loading) return <ListSkeleton rows={6} />;
+  if (loading) return <div className="mx-auto min-w-0 max-w-7xl"><ListSkeleton rows={6} /></div>;
   return (
     <div className="min-w-0 space-y-4">
       {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
