@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { MessageSquareText, Pencil, Settings2 } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
-import { BackofficeDialog, ListSkeleton } from "../components/index.js";
+import { BackofficeDialog, BackofficeListSkeletonLoading } from "../components/index.js";
 import { useAuth } from "../../../contexts/AuthContext.jsx";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
@@ -188,7 +188,7 @@ export function SettingsView() {
     }
   };
 
-  if (loading) return <div className="mx-auto min-w-0 max-w-7xl"><ListSkeleton rows={5} /></div>;
+  if (loading) return <BackofficeListSkeletonLoading rows={5} />;
   const normalizedSettings = settings.filter((s) => String(s?.clave || "").toLowerCase() !== "tipocambiodolar");
   return (
     <div className="min-w-0 max-w-full space-y-4">

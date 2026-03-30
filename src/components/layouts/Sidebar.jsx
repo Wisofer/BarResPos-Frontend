@@ -52,13 +52,13 @@ export function Sidebar({ open = true, collapsed = false, onNavigate }) {
   return (
     <aside
       className={cn(
-        "fixed left-0 top-0 z-40 h-screen border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm transition-[width] duration-200",
+        "fixed left-0 top-0 z-40 h-screen max-w-full overflow-x-hidden border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm transition-[width] duration-200",
         "w-64 lg:translate-x-0",
         collapsed && "lg:w-20",
         open ? "translate-x-0" : "-translate-x-full"
       )}
     >
-      <div className="flex h-full flex-col">
+      <div className="flex h-full min-h-0 flex-col">
         <div
           className={cn(
             "flex h-16 shrink-0 items-center border-b border-slate-200 dark:border-slate-800 px-3",
@@ -82,7 +82,7 @@ export function Sidebar({ open = true, collapsed = false, onNavigate }) {
             />
           )}
         </div>
-        <nav className="flex-1 space-y-0.5 overflow-x-hidden p-3">
+        <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden p-3">
           {visibleMenuItems.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
@@ -121,12 +121,16 @@ export function Sidebar({ open = true, collapsed = false, onNavigate }) {
             onClick={handleLogout}
             title="Cerrar sesión"
             className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-100 w-full transition-colors",
-              collapsed && "justify-center px-2 w-auto"
+              "flex w-full min-w-0 max-w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100",
+              collapsed && "w-auto justify-center px-2"
             )}
           >
             <LogOut className="h-5 w-5 shrink-0" />
-            {!collapsed && <span>Cerrar sesión</span>}
+            {!collapsed && (
+              <span className="min-w-0 truncate text-left" title="Cerrar sesión">
+                Cerrar sesión
+              </span>
+            )}
           </button>
         </div>
       </div>

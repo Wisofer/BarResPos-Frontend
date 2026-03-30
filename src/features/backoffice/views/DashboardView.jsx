@@ -2,7 +2,7 @@ import { CircleDollarSign, ClipboardList, Clock3, ShoppingBag, Sparkles, BarChar
 import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { backofficeApi } from "../services/backofficeApi.js";
-import { ListSkeleton, StatCardsSkeleton } from "../components/index.js";
+import { BackofficePageShell, BackofficeStatCardsListSkeleton } from "../components/index.js";
 import { formatCurrency } from "../utils/currency.js";
 
 const icons = [ClipboardList, BarChart3, CircleDollarSign, Clock3];
@@ -155,16 +155,11 @@ export function DashboardView({ currencySymbol = "C$" }) {
     [salesSeries]
   );
   if (loading) {
-    return (
-      <div className="mx-auto min-w-0 max-w-7xl space-y-4">
-        <StatCardsSkeleton />
-        <ListSkeleton rows={4} />
-      </div>
-    );
+    return <BackofficeStatCardsListSkeleton listRows={4} maxWidth="7xl" />;
   }
 
   return (
-    <div className="mx-auto min-w-0 max-w-7xl space-y-4">
+    <BackofficePageShell maxWidth="7xl" className="space-y-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((item, idx) => {
           const Icon = icons[idx];
@@ -298,6 +293,6 @@ export function DashboardView({ currencySymbol = "C$" }) {
           </div>
         </article>
       </div>
-    </div>
+    </BackofficePageShell>
   );
 }

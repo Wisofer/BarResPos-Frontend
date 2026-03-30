@@ -234,7 +234,9 @@ export function AuthHome() {
 
       <div
         className={`grid min-h-0 w-full min-w-0 grid-cols-1 gap-4 min-h-[calc(100dvh-1rem)] md:gap-6 md:min-h-[calc(100dvh-1.5rem)] lg:gap-6 ${
-          sidebarCollapsed ? "lg:grid-cols-[88px_1fr]" : "lg:grid-cols-[260px_1fr]"
+          sidebarCollapsed
+            ? "lg:grid-cols-[minmax(0,88px)_minmax(0,1fr)]"
+            : "lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)]"
         } lg:h-[calc(100vh-2rem)] lg:max-h-[calc(100vh-2rem)]`}
       >
         <SidebarNav

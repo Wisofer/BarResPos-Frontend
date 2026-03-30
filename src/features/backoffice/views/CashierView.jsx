@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { PAGINATION } from "../constants/pagination.js";
 import { backofficeApi } from "../services/backofficeApi.js";
-import { ListSkeleton } from "../components/index.js";
+import { BackofficeListSkeletonLoading } from "../components/index.js";
 import { formatCurrency } from "../utils/currency.js";
 import {
   cierreDetalleDiferencia,
@@ -113,7 +113,7 @@ export function CashierView({ currencySymbol = "C$" }) {
     }
   };
 
-  if (loading) return <div className="mx-auto min-w-0 max-w-7xl"><ListSkeleton rows={5} /></div>;
+  if (loading) return <BackofficeListSkeletonLoading rows={5} maxWidth="3xl" />;
   const totalEfectivo =
     preview?.totales?.efectivo ??
     preview?.totales?.totalEfectivo ??

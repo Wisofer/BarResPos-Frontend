@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { PAGINATION } from "../constants/pagination.js";
 import { backofficeApi } from "../services/backofficeApi.js";
-import { BackofficeDialog, ListSkeleton, StatCardsSkeleton } from "../components/index.js";
+import { BackofficeDialog, BackofficeStatCardsListSkeleton } from "../components/index.js";
 import { formatCurrency } from "../utils/currency.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
@@ -515,12 +515,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
   };
 
   if (loading) {
-    return (
-      <div className="mx-auto min-w-0 max-w-7xl space-y-4">
-        <StatCardsSkeleton />
-        <ListSkeleton rows={8} />
-      </div>
-    );
+    return <BackofficeStatCardsListSkeleton listRows={8} />;
   }
 
   if (categoriesScreen) {

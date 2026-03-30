@@ -16,11 +16,11 @@ import {
 import { backofficeApi } from "../services/backofficeApi.js";
 import {
   BackofficeDialog,
+  BackofficeStatCardsListSkeleton,
   ListSkeleton,
   PosInlineOpcionesPanel,
   PosProductOpcionesModal,
   PosProcesarVentaModal,
-  StatCardsSkeleton,
 } from "../components/index.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
@@ -1317,12 +1317,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   }, [activeTableMenu]);
 
   if (loading) {
-    return (
-      <div className="mx-auto min-w-0 max-w-7xl space-y-4">
-        <StatCardsSkeleton />
-        <ListSkeleton rows={5} />
-      </div>
-    );
+    return <BackofficeStatCardsListSkeleton listRows={5} />;
   }
 
   if (posOpen && posTable) {

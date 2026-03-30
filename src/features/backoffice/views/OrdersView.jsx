@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Check, Download, Eye, FilterX, Pencil, Printer, Search, X, XCircle } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
-import { ListSkeleton } from "../components/index.js";
+import { BackofficeListSkeletonLoading } from "../components/index.js";
 import { PAGINATION } from "../constants/pagination.js";
 import { formatCurrency } from "../utils/currency.js";
 import { getApiUrl } from "../../../api/config.js";
@@ -469,7 +469,7 @@ export function OrdersView({ currencySymbol = "C$" }) {
     }, 180);
   };
 
-  if (loading) return <div className="mx-auto min-w-0 max-w-7xl"><ListSkeleton rows={6} /></div>;
+  if (loading) return <BackofficeListSkeletonLoading rows={6} />;
 
   if (showDetail && detailOrder) {
     const createdAtLabel = formatDateTimeLabel(detailOrder.fechaCreacion);

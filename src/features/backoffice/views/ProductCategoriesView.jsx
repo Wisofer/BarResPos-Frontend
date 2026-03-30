@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Pencil, Plus, PowerOff, Trash2 } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
-import { BackofficeDialog, ListSkeleton } from "../components/index.js";
+import { BackofficeDialog, BackofficeListSkeletonLoading } from "../components/index.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
 
@@ -168,7 +168,7 @@ export function ProductCategoriesView({ onBackToProducts, onOpenProducts, onCate
     }
   };
 
-  if (loading) return <div className="mx-auto min-w-0 max-w-7xl"><ListSkeleton rows={8} /></div>;
+  if (loading) return <BackofficeListSkeletonLoading rows={8} />;
 
   return (
     <div className="space-y-4">

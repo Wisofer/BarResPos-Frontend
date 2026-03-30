@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, ChefHat, RefreshCw, Send } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
-import { ListSkeleton } from "../components/index.js";
+import { BackofficeListSkeletonLoading } from "../components/index.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 
 const KDS_SECTIONS = [
@@ -137,7 +137,7 @@ export function KitchenView() {
     return base;
   }, [filtered]);
 
-  if (loading) return <div className="mx-auto min-w-0 max-w-7xl"><ListSkeleton rows={6} /></div>;
+  if (loading) return <BackofficeListSkeletonLoading rows={6} />;
   return (
     <div className="min-w-0 space-y-4">
       {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}

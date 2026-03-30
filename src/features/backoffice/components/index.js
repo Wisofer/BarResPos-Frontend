@@ -1,6 +1,12 @@
 export { SidebarNav } from "./SidebarNav.jsx";
 export { MobileNav } from "./MobileNav.jsx";
-export { StatCardsSkeleton, ListSkeleton } from "./Skeletons.jsx";
+export {
+  BackofficeListSkeletonLoading,
+  BackofficePageShell,
+  BackofficeStatCardsListSkeleton,
+  ListSkeleton,
+  StatCardsSkeleton,
+} from "./Skeletons.jsx";
 export { PosProcesarVentaModal } from "./PosProcesarVentaModal.jsx";
 export { PosProductOpcionesModal } from "./PosProductOpcionesModal.jsx";
 export { PosInlineOpcionesPanel } from "./PosInlineOpcionesPanel.jsx";
