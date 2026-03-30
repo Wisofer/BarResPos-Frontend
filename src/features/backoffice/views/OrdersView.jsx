@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Check, Download, FilterX, Pencil, Printer, Search, X, XCircle } from "lucide-react";
+import { ArrowLeft, Check, Download, Eye, FilterX, Pencil, Printer, Search, X, XCircle } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { ListSkeleton } from "../components/index.js";
 import { PAGINATION } from "../constants/pagination.js";
@@ -1029,9 +1029,9 @@ export function OrdersView({ currencySymbol = "C$" }) {
                           onClick={() => openDetail(order)}
                           disabled={busyAction}
                           title="Ver detalle"
-                          className="inline-flex items-center text-xs font-semibold text-sky-700 hover:text-sky-800 hover:underline disabled:opacity-50"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                         >
-                          Ver detalle
+                          <Eye className="h-3.5 w-3.5" />
                         </button>
                         {isAdmin && (
                           <button

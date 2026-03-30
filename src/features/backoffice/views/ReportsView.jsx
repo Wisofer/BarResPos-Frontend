@@ -163,24 +163,34 @@ export function ReportsView({ currencySymbol = "C$" }) {
         setRows(Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : []);
         setSummary(null);
       } else if (reportId === "meseros") {
-        const pedidos = await backofficeApi.listPedidos({ ...reportApiDateRange(range), page: 1, pageSize: 500 });
-        const items = Array.isArray(pedidos?.items) ? pedidos.items : [];
-        const grouped = items.reduce((acc, p) => {
-          const key = p.mesero || p.usuario || "Sin mesero";
-          const curr = acc.get(key) || { mesero: key, ordenes: 0, venta: 0 };
-          curr.ordenes += 1;
-          curr.venta += Number(p.monto ?? p.total ?? 0);
-          acc.set(key, curr);
-          return acc;
-        }, new Map());
-        const result = Array.from(grouped.values()).sort((a, b) => b.venta - a.venta);
+        const data = await backofficeApi.reportesVentasPorMesero(reportRange);
+        const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+        const result = items
+          .map((r) => ({
+            meseroId: r.meseroId ?? r.MeseroId ?? null,
+            mesero: r.mesero || r.usuario || "Sin mesero",
+            ordenes: Number(r.ordenes ?? r.Ordenes ?? 0),
+            venta: Number(r.totalVentas ?? r.total ?? r.venta ?? 0),
+            promedioTicket: Number(r.promedioTicket ?? r.ticketPromedio ?? 0),
+          }))
+          .sort((a, b) => b.venta - a.venta);
         setRows(result);
-        const totalVentas = result.reduce((sum, r) => sum + Number(r.venta || 0), 0);
-        const totalOrdenes = result.reduce((sum, r) => sum + Number(r.ordenes || 0), 0);
+        const totalVentas = Number(
+          data?.totalVentas ??
+            data?.total ??
+            result.reduce((sum, r) => sum + Number(r.venta || 0), 0)
+        );
+        const totalOrdenes = Number(
+          data?.totalOrdenes ??
+            data?.ordenes ??
+            result.reduce((sum, r) => sum + Number(r.ordenes || 0), 0)
+        );
         setSummary({
           totalVentas,
           totalOrdenes,
-          promedioTicket: totalOrdenes > 0 ? totalVentas / totalOrdenes : 0,
+          promedioTicket:
+            Number(data?.promedioTicket ?? data?.ticketPromedio) ||
+            (totalOrdenes > 0 ? totalVentas / totalOrdenes : 0),
         });
       } else if (reportId === "categorias") {
         const data = await backofficeApi.dashboardResumen(reportApiDateRange(range));

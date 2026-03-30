@@ -169,13 +169,21 @@ export function UsersView() {
                 <p className="text-xs text-slate-500">Nombre: {u.nombreCompleto || "-"} | Rol: {u.rol || "N/D"} | Estado: {u.activo === false ? "Inactivo" : "Activo"}</p>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => openEdit(u)} className="inline-flex items-center gap-1 rounded-md bg-blue-500 px-2 py-1 text-[11px] font-semibold text-white hover:bg-blue-600">
-                  <Pencil className="h-3 w-3" />
-                  Editar
+                <button
+                  onClick={() => openEdit(u)}
+                  title="Editar usuario"
+                  aria-label="Editar usuario"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
                 </button>
-                <button onClick={() => setConfirmDeleteUser({ open: true, user: u })} className="inline-flex items-center gap-1 rounded-md bg-red-500 px-2 py-1 text-[11px] font-semibold text-white hover:bg-red-600">
-                  <Trash2 className="h-3 w-3" />
-                  Eliminar
+                <button
+                  onClick={() => setConfirmDeleteUser({ open: true, user: u })}
+                  title="Eliminar usuario"
+                  aria-label="Eliminar usuario"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-rose-200 text-rose-600 hover:bg-rose-50"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
             </article>

@@ -101,6 +101,7 @@ export const backofficeApi = {
   reportesResumenVentas: (params) => api.get(`/api/v1/reportes/resumen-ventas${qs(params)}`),
   reportesResumenVentasDetalle: (params) => api.get(`/api/v1/reportes/resumen-ventas/detalle${qs(params)}`),
   reportesProductosTop: (params) => api.get(`/api/v1/reportes/productos-top${qs(params)}`),
+  reportesVentasPorMesero: (params) => api.get(`/api/v1/reportes/ventas-por-mesero${qs(params)}`),
 
   /** Delivery: misma entidad orden/factura, origenPedido Delivery, sin mesa. */
   listDeliveryPedidos: (params) => api.get(`/api/v1/delivery/pedidos${qs(params)}`),
