@@ -13,7 +13,8 @@ export function resolveBackendAssetUrl(url) {
  * Imprime un blob en un iframe oculto (evita bloqueo de popups en muchos navegadores).
  * @returns {Promise<boolean>}
  */
-export function printBlobInHiddenFrame(blob) {
+export function printBlobInHiddenFrame(blob, options = {}) {
+  const { shouldPrint = true } = options;
   return new Promise((resolve) => {
     try {
       const blobUrl = URL.createObjectURL(blob);
@@ -25,30 +26,52 @@ export function printBlobInHiddenFrame(blob) {
       iframe.style.height = "0";
       iframe.style.border = "0";
       iframe.src = blobUrl;
+      let didPrint = false;
+      let didResolve = false;
+      const safeResolve = (val) => {
+        if (didResolve) return;
+        didResolve = true;
+        resolve(val);
+      };
+
       iframe.onload = () => {
         try {
-          setTimeout(() => {
-            try {
-              iframe.contentWindow?.focus();
-              iframe.contentWindow?.print();
-            } finally {
-              setTimeout(() => {
+          if (shouldPrint) {
+            if (didPrint) return;
+            didPrint = true;
+            setTimeout(() => {
+              try {
+                iframe.contentWindow?.focus();
+                iframe.contentWindow?.print();
+              } finally {
+                setTimeout(() => {
+                  URL.revokeObjectURL(blobUrl);
+                  iframe.remove();
+                  safeResolve(true);
+                }, 1500);
+              }
+            }, 150);
+          } else {
+            // Deja que el HTML (si ya trae window.print() automático) haga su trabajo.
+            setTimeout(() => {
+              try {
                 URL.revokeObjectURL(blobUrl);
                 iframe.remove();
-                resolve(true);
-              }, 1500);
-            }
-          }, 150);
+              } finally {
+                safeResolve(true);
+              }
+            }, 1500);
+          }
         } catch {
           URL.revokeObjectURL(blobUrl);
           iframe.remove();
-          resolve(false);
+          safeResolve(false);
         }
       };
       iframe.onerror = () => {
         URL.revokeObjectURL(blobUrl);
         iframe.remove();
-        resolve(false);
+        safeResolve(false);
       };
       document.body.appendChild(iframe);
     } catch {
@@ -72,7 +95,10 @@ export async function openBackendPrintUrl(url) {
     });
     if (!res.ok) return false;
     const blob = await res.blob();
-    return await printBlobInHiddenFrame(blob);
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    const looksLikeHtml = ct.includes("text/html") || ct.includes("application/xhtml+xml");
+    // Si es HTML, normalmente ya dispara window.print() en el backend; evitar doble diálogo.
+    return await printBlobInHiddenFrame(blob, { shouldPrint: !looksLikeHtml });
   } catch {
     return false;
   }
@@ -83,7 +109,9 @@ export async function openBackendPrintHtml(html) {
   if (!html || typeof html !== "string") return false;
   try {
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    return await printBlobInHiddenFrame(blob);
+    // Para HTML evitamos el `print()` desde el frontend para prevenir el doble diálogo
+    // (el backend suele disparar window.print() al cargar el documento).
+    return await printBlobInHiddenFrame(blob, { shouldPrint: false });
   } catch {
     return false;
   }

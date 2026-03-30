@@ -44,7 +44,6 @@ import {
 } from "../utils/posPedido.js";
 import { isAdminUser } from "../utils/auth.js";
 import {
-  openAuthenticatedBackendBlobInNewTab,
   openBackendPrintHtml,
   openBackendPrintUrl,
 } from "../utils/backofficePrint.js";
@@ -116,6 +115,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   const [saleBackendTotal, setSaleBackendTotal] = useState(null);
   const [saleOrdenId, setSaleOrdenId] = useState(null);
   const [saleProcessing, setSaleProcessing] = useState(false);
+  const saleProcessingGuardRef = useRef(false);
   const [tipoCambio, setTipoCambio] = useState(null);
   const [locationsModalOpen, setLocationsModalOpen] = useState(false);
   const [locationForm, setLocationForm] = useState({ id: null, nombre: "", descripcion: "", activo: true });
@@ -1147,6 +1147,8 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
 
   const handleGuardarVenta = async (form) => {
     if (!posTable || !saleOrdenId) return;
+    if (saleProcessingGuardRef.current) return;
+    saleProcessingGuardRef.current = true;
     setSaleProcessing(true);
     setError("");
     try {
@@ -1191,9 +1193,20 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       }
 
       const url = resp?.urlImpresionRecibo ?? resp?.UrlImpresionRecibo ?? resp?.url ?? resp?.Url;
+      const html =
+        resp?.htmlImpresionRecibo ??
+        resp?.HtmlImpresionRecibo ??
+        resp?.htmlPrecuenta ??
+        resp?.HtmlPrecuenta ??
+        null;
 
-      if (url) {
-        await openAuthenticatedBackendBlobInNewTab(url);
+      // Preferimos iframe oculto para evitar que el navegador abra otra pestaña.
+      if (html && typeof html === "string") {
+        const ok = await openBackendPrintHtml(html);
+        if (!ok) snackbar.error("No se pudo imprimir el recibo.");
+      } else if (url) {
+        const ok = await openBackendPrintUrl(url);
+        if (!ok) snackbar.error("No se pudo imprimir el recibo.");
       }
 
       snackbar.success("Venta procesada.");
@@ -1209,6 +1222,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       snackbar.error(msg);
     } finally {
       setSaleProcessing(false);
+      saleProcessingGuardRef.current = false;
     }
   };
 

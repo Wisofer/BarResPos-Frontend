@@ -25,7 +25,6 @@ import {
 import { PAGINATION } from "../constants/pagination.js";
 import { DEFAULT_TIPO_CAMBIO_USD, formatCurrency } from "../utils/currency.js";
 import {
-  openAuthenticatedBackendBlobInNewTab,
   openBackendPrintHtml,
   openBackendPrintUrl,
 } from "../utils/backofficePrint.js";
@@ -431,39 +430,46 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
     if (!pid) return;
     setActionBusy(true);
     try {
-      const pre = await backofficeApi.deliveryPedidoPrecuenta(pid);
-      const urlPrecuenta =
-        pre?.urlImpresionPrecuenta ??
-        pre?.UrlImpresionPrecuenta ??
-        pre?.urlImpresion ??
-        pre?.UrlImpresion ??
-        null;
-      const htmlPrecuenta = pre?.htmlPrecuenta ?? pre?.HtmlPrecuenta ?? null;
-
-      if (urlPrecuenta && (await openBackendPrintUrl(urlPrecuenta))) {
-        snackbar.info("Pre-cuenta lista para imprimir.");
-        return;
-      }
-      if (htmlPrecuenta && (await openBackendPrintHtml(htmlPrecuenta))) {
-        snackbar.info("Pre-cuenta lista para imprimir.");
-        return;
-      }
-      try {
-        const rawHtml = await backofficeApi.deliveryPedidoPrecuentaHtml(pid);
-        const htmlDirect = typeof rawHtml === "string" ? rawHtml : rawHtml?.html ?? rawHtml?.Html ?? null;
-        if (htmlDirect && (await openBackendPrintHtml(htmlDirect))) {
-          snackbar.info("Pre-cuenta lista para imprimir.");
-          return;
-        }
-      } catch {
-        /* ignore */
-      }
-      snackbar.error("No se pudo obtener la pre-cuenta para imprimir.");
+      await printDeliveryPrecuenta(pid);
     } catch (e) {
       snackbar.error(e?.message || "No se pudo imprimir la cuenta.");
     } finally {
       setActionBusy(false);
     }
+  };
+
+  const printDeliveryPrecuenta = async (pid) => {
+    const pre = await backofficeApi.deliveryPedidoPrecuenta(pid);
+    const urlPrecuenta =
+      pre?.urlImpresionPrecuenta ??
+      pre?.UrlImpresionPrecuenta ??
+      pre?.urlImpresion ??
+      pre?.UrlImpresion ??
+      null;
+    const htmlPrecuenta = pre?.htmlPrecuenta ?? pre?.HtmlPrecuenta ?? null;
+
+    if (urlPrecuenta && (await openBackendPrintUrl(urlPrecuenta))) {
+      snackbar.info("Pre-cuenta lista para imprimir.");
+      return true;
+    }
+    if (htmlPrecuenta && (await openBackendPrintHtml(htmlPrecuenta))) {
+      snackbar.info("Pre-cuenta lista para imprimir.");
+      return true;
+    }
+
+    try {
+      const rawHtml = await backofficeApi.deliveryPedidoPrecuentaHtml(pid);
+      const htmlDirect = typeof rawHtml === "string" ? rawHtml : rawHtml?.html ?? rawHtml?.Html ?? null;
+      if (htmlDirect && (await openBackendPrintHtml(htmlDirect))) {
+        snackbar.info("Pre-cuenta lista para imprimir.");
+        return true;
+      }
+    } catch {
+      // sin fallback adicional; mantenemos mismo canal de impresión backend
+    }
+
+    snackbar.error("No se pudo obtener la pre-cuenta para imprimir.");
+    return false;
   };
 
   const handleEnviarCocina = async () => {
@@ -560,8 +566,20 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
       }
 
       const url = resp?.urlImpresionRecibo ?? resp?.UrlImpresionRecibo ?? resp?.url ?? resp?.Url;
-      if (url) {
-        await openAuthenticatedBackendBlobInNewTab(url);
+      const html =
+        resp?.htmlImpresionRecibo ??
+        resp?.HtmlImpresionRecibo ??
+        resp?.htmlPrecuenta ??
+        resp?.HtmlPrecuenta ??
+        null;
+
+      // Evitamos abrir pestaña nueva: si hay HTML lo imprimimos con iframe oculto.
+      if (html && typeof html === "string") {
+        const ok = await openBackendPrintHtml(html);
+        if (!ok) snackbar.error("No se pudo imprimir el recibo.");
+      } else if (url) {
+        const ok = await openBackendPrintUrl(url);
+        if (!ok) snackbar.error("No se pudo imprimir el recibo.");
       }
 
       snackbar.success("Venta procesada.");
@@ -590,34 +608,8 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
     }
     setActionBusy(true);
     try {
-      const pre = await backofficeApi.deliveryPedidoPrecuenta(pid);
-      const urlPrecuenta =
-        pre?.urlImpresionPrecuenta ??
-        pre?.UrlImpresionPrecuenta ??
-        pre?.urlImpresion ??
-        pre?.UrlImpresion ??
-        null;
-      const htmlPrecuenta = pre?.htmlPrecuenta ?? pre?.HtmlPrecuenta ?? null;
-
-      if (urlPrecuenta && (await openBackendPrintUrl(urlPrecuenta))) {
-        snackbar.info("Pre-cuenta lista para imprimir.");
-        return;
-      }
-      if (htmlPrecuenta && (await openBackendPrintHtml(htmlPrecuenta))) {
-        snackbar.info("Pre-cuenta lista para imprimir.");
-        return;
-      }
-      try {
-        const rawHtml = await backofficeApi.deliveryPedidoPrecuentaHtml(pid);
-        const htmlDirect = typeof rawHtml === "string" ? rawHtml : rawHtml?.html ?? rawHtml?.Html ?? null;
-        if (htmlDirect && (await openBackendPrintHtml(htmlDirect))) {
-          snackbar.info("Pre-cuenta lista para imprimir.");
-          return;
-        }
-      } catch {
-        // sin fallback adicional; mantenemos mismo canal de impresión backend
-      }
-      snackbar.error("No se pudo obtener la pre-cuenta para imprimir.");
+      const printed = await printDeliveryPrecuenta(pid);
+      if (printed) return;
     } catch (e) {
       snackbar.error(e?.message || "No se pudo imprimir la cuenta.");
     } finally {

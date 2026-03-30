@@ -6,6 +6,7 @@ import { BackofficePageShell, BackofficeStatCardsListSkeleton } from "../compone
 import { formatCurrency } from "../utils/currency.js";
 
 const icons = [ClipboardList, BarChart3, CircleDollarSign, Clock3];
+const TOP_PRODUCTS_LIMIT = 3;
 
 function parseSeriesDate(rawDate) {
   if (!rawDate) return null;
@@ -37,7 +38,7 @@ export function DashboardView({ currencySymbol = "C$" }) {
   useEffect(() => {
     let mounted = true;
     backofficeApi
-      .dashboardResumen({ topProductos: 3 })
+      .dashboardResumen({ topProductos: TOP_PRODUCTS_LIMIT })
       .then((dashboard) => {
         if (!mounted) return;
         const kpis = dashboard?.kpis || {};
@@ -66,7 +67,7 @@ export function DashboardView({ currencySymbol = "C$" }) {
         setRangeLabel(desdeLabel && hastaLabel ? `${desdeLabel} - ${hastaLabel}` : "Rango por defecto");
 
         setTopProducts(
-          topItems.slice(0, 3).map((x) => ({
+          topItems.slice(0, TOP_PRODUCTS_LIMIT).map((x) => ({
             name: x.producto || x.nombre || "Producto",
             sold: x.cantidad || 0,
             amount: formatCurrency(x.venta || x.total || 0, currencySymbol),
@@ -149,7 +150,7 @@ export function DashboardView({ currencySymbol = "C$" }) {
     };
   }, [currencySymbol]);
 
-  const safeProducts = useMemo(() => topProducts.slice(0, 3), [topProducts]);
+  const safeProducts = useMemo(() => topProducts.slice(0, TOP_PRODUCTS_LIMIT), [topProducts]);
   const statsByTitle = useMemo(() => {
     const m = new Map();
     (stats || []).forEach((s) => {
