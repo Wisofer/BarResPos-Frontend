@@ -51,6 +51,13 @@ export function DashboardView({ currencySymbol = "C$" }) {
         const mesasActivas = kpis?.mesasOcupadas ?? dashboard?.mesasOcupadas ?? 0;
         const ingresoDiario = kpis?.totalVentasHoy ?? dashboard?.totalVentasHoy ?? 0;
         const ticketPromedio = kpis?.ticketPromedioHoy ?? dashboard?.ticketPromedioHoy ?? 0;
+        /** Suma Pago.Monto del día (caja abierta); mismo criterio que preview de caja. */
+        const totalCajaHoy =
+          kpis?.totalCajaHoy ??
+          kpis?.TotalCajaHoy ??
+          dashboard?.totalCajaHoy ??
+          dashboard?.kpis?.totalCajaHoy ??
+          0;
         const ventasMes = kpis?.ventasMes ?? dashboard?.ventasMes ?? 0;
         const ventasSemana = kpis?.ventasSemana ?? dashboard?.ventasSemana ?? 0;
 
@@ -113,7 +120,7 @@ export function DashboardView({ currencySymbol = "C$" }) {
         setStats([
           { title: "Ordenes hoy", value: String(ordenesHoy), detail: `${kpis?.ordenesPendientesPago ?? 0} pendientes de pago` },
           { title: "Mesas ocupadas", value: String(mesasActivas), detail: "Fuente: dashboard/resumen" },
-          { title: "Ventas hoy", value: formatCurrency(ingresoDiario, currencySymbol), detail: `Caja hoy: ${formatCurrency(kpis?.totalCajaHoy ?? 0, currencySymbol)}` },
+          { title: "Ventas hoy", value: formatCurrency(ingresoDiario, currencySymbol), detail: `Caja hoy: ${formatCurrency(totalCajaHoy, currencySymbol)}` },
           { title: "Ticket promedio", value: formatCurrency(ticketPromedio, currencySymbol), detail: "Promedio actual" },
         ]);
         setMonthRevenue(Number(ventasMes || 0));

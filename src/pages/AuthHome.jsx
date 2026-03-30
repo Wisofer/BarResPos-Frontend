@@ -233,9 +233,9 @@ export function AuthHome() {
       />
 
       <div
-        className={`grid min-h-[calc(100vh-2rem)] w-full min-w-0 grid-cols-1 gap-4 md:min-h-[calc(100vh-3rem)] lg:gap-6 ${
+        className={`grid min-h-0 w-full min-w-0 grid-cols-1 gap-4 min-h-[calc(100dvh-1rem)] md:gap-6 md:min-h-[calc(100dvh-1.5rem)] lg:gap-6 ${
           sidebarCollapsed ? "lg:grid-cols-[88px_1fr]" : "lg:grid-cols-[260px_1fr]"
-        }`}
+        } lg:h-[calc(100vh-2rem)] lg:max-h-[calc(100vh-2rem)]`}
       >
         <SidebarNav
           collapsed={sidebarCollapsed}
@@ -247,9 +247,9 @@ export function AuthHome() {
           navItems={navItems}
         />
 
-        <section className="min-w-0 space-y-6 pb-24 lg:pb-0 lg:pr-2">
+        <section className="flex h-full min-h-0 min-w-0 flex-col gap-4 pb-24 sm:gap-6 lg:max-h-full lg:pb-0 lg:pr-2">
           {showViewHeader && (
-            <header className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+            <header className="shrink-0 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
                 <div className="min-w-0 flex-1">
                   <h1 className="text-xl font-bold leading-tight text-slate-800 sm:text-2xl">
@@ -274,7 +274,9 @@ export function AuthHome() {
               </div>
             </header>
           )}
-          <ActiveView currencySymbol={currencySymbol} exchangeRate={tipoCambio} />
+          <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+            <ActiveView currencySymbol={currencySymbol} exchangeRate={tipoCambio} />
+          </div>
         </section>
       </div>
     </main>

@@ -54,6 +54,7 @@ import {
   mesaEsOcupadaVisual,
   mesaEsReservada,
   normalizeMesaEstado,
+  TablesMesasFloorPlan,
   TablesMesasStatsBar,
   TablesMesasZonesGrid,
 } from "../tables/index.js";
@@ -126,6 +127,8 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   const [moveOrderOpen, setMoveOrderOpen] = useState(false);
   const [moveOrderTargetId, setMoveOrderTargetId] = useState("");
   const [moveOrderCandidates, setMoveOrderCandidates] = useState([]);
+  /** "zonas" | "plano" */
+  const [mesasLayoutMode, setMesasLayoutMode] = useState("zonas");
   const isAdmin = isAdminUser(user);
 
   const syncCajaEstado = async () => {
@@ -491,6 +494,16 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     });
     return Array.from(grouped.entries()).map(([name, items]) => ({ name, items }));
   }, [tables]);
+
+  const mesasPlanoList = useMemo(() => {
+    return [...tables].sort((a, b) => {
+      const z = String(a.zone || "").localeCompare(String(b.zone || ""), "es");
+      if (z !== 0) return z;
+      return String(a.displayId || "").localeCompare(String(b.displayId || ""), "es", { numeric: true });
+    });
+  }, [tables]);
+
+  const mesasVistaExpandida = mesasLayoutMode === "plano";
 
   const mesaStats = useMemo(() => {
     let libres = 0;
@@ -1856,29 +1869,61 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   }
 
   return (
-    <div className="min-w-0 space-y-4">
-      <section className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <TablesMesasStatsBar
-          total={tables.length}
-          libres={mesaStats.libres}
-          ocupadas={mesaStats.ocupadas}
-          reservadas={mesaStats.reservadas}
-          cajaAbierta={cajaAbierta}
-          onUbicaciones={openLocationsManager}
-          onNuevaMesa={openCreate}
-        />
+    <div
+      className={
+        mesasVistaExpandida
+          ? "flex h-full min-h-0 min-w-0 flex-1 flex-col gap-3 sm:gap-4"
+          : "min-w-0 space-y-4"
+      }
+    >
+      <section
+        className={
+          mesasVistaExpandida
+            ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"
+            : "min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+        }
+      >
+        <div className={mesasVistaExpandida ? "shrink-0" : ""}>
+          <TablesMesasStatsBar
+            total={tables.length}
+            libres={mesaStats.libres}
+            ocupadas={mesaStats.ocupadas}
+            reservadas={mesaStats.reservadas}
+            cajaAbierta={cajaAbierta}
+            onUbicaciones={openLocationsManager}
+            onNuevaMesa={openCreate}
+            layoutMode={mesasLayoutMode}
+            onLayoutModeChange={setMesasLayoutMode}
+          />
+        </div>
 
-        <TablesMesasZonesGrid
-          zones={zones}
-          cajaAbierta={cajaAbierta}
-          isAdmin={isAdmin}
-          tableIllustration={tableIllustration}
-          activeTableMenu={activeTableMenu}
-          setActiveTableMenu={setActiveTableMenu}
-          onOpenPos={openPosView}
-          onOpenEdit={openEdit}
-          onRequestDelete={(id) => setConfirmDeleteTable({ open: true, id })}
-        />
+        {mesasLayoutMode === "plano" ? (
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <TablesMesasFloorPlan
+              tables={mesasPlanoList}
+              cajaAbierta={cajaAbierta}
+              isAdmin={isAdmin}
+              tableIllustration={tableIllustration}
+              activeTableMenu={activeTableMenu}
+              setActiveTableMenu={setActiveTableMenu}
+              onOpenPos={openPosView}
+              onOpenEdit={openEdit}
+              onRequestDelete={(id) => setConfirmDeleteTable({ open: true, id })}
+            />
+          </div>
+        ) : (
+          <TablesMesasZonesGrid
+            zones={zones}
+            cajaAbierta={cajaAbierta}
+            isAdmin={isAdmin}
+            tableIllustration={tableIllustration}
+            activeTableMenu={activeTableMenu}
+            setActiveTableMenu={setActiveTableMenu}
+            onOpenPos={openPosView}
+            onOpenEdit={openEdit}
+            onRequestDelete={(id) => setConfirmDeleteTable({ open: true, id })}
+          />
+        )}
       </section>
 
       {formOpen && (

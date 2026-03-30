@@ -120,30 +120,39 @@ export function CashierView({ currencySymbol = "C$" }) {
   const totalEfectivo =
     preview?.totales?.efectivo ??
     preview?.totales?.totalEfectivo ??
+    preview?.totales?.TotalEfectivo ??
     preview?.totalEfectivo ??
     preview?.efectivo ??
     0;
   const totalTarjeta =
     preview?.totales?.tarjeta ??
     preview?.totales?.totalTarjeta ??
+    preview?.totales?.TotalTarjeta ??
     preview?.totalTarjeta ??
     preview?.tarjeta ??
     0;
   const totalTransferencia =
     preview?.totales?.transferencia ??
     preview?.totales?.totalTransferencia ??
+    preview?.totales?.TotalTransferencia ??
     preview?.totalTransferencia ??
     preview?.transferencia ??
     0;
   const totalVentas =
-    preview?.totales?.totalVentas ??
+    preview?.totales?.totalVentasNetas ??
+    preview?.totales?.TotalVentasNetas ??
     preview?.totales?.totalGeneral ??
+    preview?.totales?.TotalGeneral ??
+    preview?.totales?.totalVentas ??
     preview?.totalVentas ??
     preview?.totalGeneral ??
     0;
   const totalOrdenes =
     preview?.totales?.totalOrdenesPagadas ??
     preview?.totales?.totalOrdenes ??
+    preview?.totales?.TotalOrdenes ??
+    preview?.totales?.totalPagos ??
+    preview?.totales?.TotalPagos ??
     preview?.totalOrdenesPagadas ??
     preview?.totalOrdenes ??
     0;
@@ -155,11 +164,16 @@ export function CashierView({ currencySymbol = "C$" }) {
     estado?.caja?.montoInicial ??
     estado?.cierreActual?.montoInicial ??
     0;
+  /** Contrato API: preferir totales.montoEsperado (backend); fallback apertura + efectivo neto. */
   const montoEsperadoCalculado =
-    preview?.cierre?.montoEsperado ??
-    preview?.montoEsperado ??
     preview?.totales?.montoEsperado ??
+    preview?.totales?.MontoEsperado ??
+    preview?.cierre?.montoEsperado ??
+    preview?.cierre?.MontoEsperado ??
+    preview?.montoEsperado ??
+    preview?.MontoEsperado ??
     preview?.totalEsperado ??
+    preview?.TotalEsperado ??
     (Number(montoInicialActual || 0) + Number(totalEfectivo || 0));
   const cajaAbierta = estado?.abierta || estado?.estado === "Abierto";
 
