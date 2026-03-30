@@ -43,9 +43,13 @@ import {
   unwrapEnvelope,
 } from "../utils/posPedido.js";
 import { isAdminUser } from "../utils/auth.js";
+import {
+  openAuthenticatedBackendBlobInNewTab,
+  openBackendPrintHtml,
+  openBackendPrintUrl,
+} from "../utils/backofficePrint.js";
+import { fetchPosProductosYCategorias } from "../utils/posCatalogLoad.js";
 import { useAuth } from "../../../contexts/AuthContext.jsx";
-import { getToken } from "../../../api/token.js";
-import { getApiUrl } from "../../../api/config.js";
 import {
   mesaEsOcupadaVisual,
   mesaEsReservada,
@@ -450,15 +454,9 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     setPosInlineOpcionesProduct(null);
     setPosOpcionesModal({ open: false, product: null });
     try {
-      const [orderActiva, productsData, categoriesData] = await Promise.all([
+      const [orderActiva, catalog] = await Promise.all([
         backofficeApi.getMesaOrdenActiva(table.id).catch(() => null),
-        backofficeApi.listProductos({
-          page: 1,
-          pageSize: PAGINATION.POS_PRODUCTOS,
-          activos: true,
-          incluirOpciones: true,
-        }),
-        backofficeApi.catalogoCategoriasProducto(),
+        fetchPosProductosYCategorias(backofficeApi, PAGINATION.POS_PRODUCTOS),
       ]);
       const orderActive = unwrapEnvelope(orderActiva);
       setPosOrderId(getOrdenPedidoId(orderActive, null));
@@ -474,10 +472,8 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
         setPosCommitted(false);
       }
 
-      const products = Array.isArray(productsData?.items) ? productsData.items : [];
-      const categories = Array.isArray(categoriesData) ? categoriesData : categoriesData?.items || [];
-      setPosProducts(products);
-      setPosCategories(categories);
+      setPosProducts(catalog.products);
+      setPosCategories(catalog.categories);
     } catch (e) {
       setError(e.message || "No se pudo cargar productos para la mesa.");
       snackbar.error(e.message || "No se pudo cargar productos para la mesa.");
@@ -979,79 +975,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     };
   };
 
-  const printBlobInHiddenFrame = (blob) =>
-    new Promise((resolve) => {
-      try {
-        const blobUrl = URL.createObjectURL(blob);
-        const iframe = document.createElement("iframe");
-        iframe.style.position = "fixed";
-        iframe.style.right = "0";
-        iframe.style.bottom = "0";
-        iframe.style.width = "0";
-        iframe.style.height = "0";
-        iframe.style.border = "0";
-        iframe.src = blobUrl;
-        iframe.onload = () => {
-          try {
-            setTimeout(() => {
-              try {
-                iframe.contentWindow?.focus();
-                iframe.contentWindow?.print();
-              } finally {
-                setTimeout(() => {
-                  URL.revokeObjectURL(blobUrl);
-                  iframe.remove();
-                  resolve(true);
-                }, 1500);
-              }
-            }, 150);
-          } catch {
-            URL.revokeObjectURL(blobUrl);
-            iframe.remove();
-            resolve(false);
-          }
-        };
-        iframe.onerror = () => {
-          URL.revokeObjectURL(blobUrl);
-          iframe.remove();
-          resolve(false);
-        };
-        document.body.appendChild(iframe);
-      } catch {
-        resolve(false);
-      }
-    });
-
-  const openBackendPrintUrl = async (url) => {
-    if (!url) return false;
-    const token = getToken();
-    const resolved = url?.startsWith("http") ? url : `${getApiUrl()}${url?.startsWith("/") ? url : `/${url}`}`;
-    try {
-      const res = await fetch(resolved, {
-        method: "GET",
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-      if (!res.ok) return false;
-      const blob = await res.blob();
-      return await printBlobInHiddenFrame(blob);
-    } catch {
-      return false;
-    }
-  };
-
-  const openBackendPrintHtml = (html) => {
-    if (!html || typeof html !== "string") return false;
-    try {
-      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-      printBlobInHiddenFrame(blob);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
   const ensurePosOrderSynced = async () => {
     if (!posTable) return posOrderId;
     if (posCart.length === 0) return posOrderId;
@@ -1276,29 +1199,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       const url = resp?.urlImpresionRecibo ?? resp?.UrlImpresionRecibo ?? resp?.url ?? resp?.Url;
 
       if (url) {
-        const token = getToken();
-        const resolved =
-          url?.startsWith("http") ? url : url?.startsWith("/") ? `${getApiUrl()}${url}` : `${getApiUrl()}/${url}`;
-
-        try {
-          const res = await fetch(resolved, {
-            method: "GET",
-            headers: {
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-          });
-
-          if (res.ok) {
-            const blob = await res.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            window.open(blobUrl, "_blank", "noopener,noreferrer");
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-          } else {
-            window.open(resolved, "_blank", "noopener,noreferrer");
-          }
-        } catch {
-          window.open(resolved, "_blank", "noopener,noreferrer");
-        }
+        await openAuthenticatedBackendBlobInNewTab(url);
       }
 
       snackbar.success("Venta procesada.");
@@ -1352,7 +1253,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
         }
       }
 
-      if (htmlPrecuenta && openBackendPrintHtml(htmlPrecuenta)) {
+      if (htmlPrecuenta && (await openBackendPrintHtml(htmlPrecuenta))) {
         snackbar.info("Pre-cuenta lista para imprimir.");
         return;
       }
@@ -1361,7 +1262,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       try {
         const rawHtml = await backofficeApi.pedidoPrecuentaHtml(ordenId);
         const htmlDirect = typeof rawHtml === "string" ? rawHtml : rawHtml?.html ?? rawHtml?.Html ?? null;
-        if (htmlDirect && openBackendPrintHtml(htmlDirect)) {
+        if (htmlDirect && (await openBackendPrintHtml(htmlDirect))) {
           snackbar.info("Pre-cuenta lista para imprimir.");
           return;
         }

@@ -5,13 +5,14 @@ import { BackofficeShellHeaderActions, MobileNav, SidebarNav } from "../features
 import { NAV_ITEMS } from "../features/backoffice/constants.js";
 import { backofficeApi } from "../features/backoffice/services/backofficeApi.js";
 import { PAGINATION } from "../features/backoffice/constants/pagination.js";
-import { resolveCurrencySymbol } from "../features/backoffice/utils/currency.js";
+import { DEFAULT_TIPO_CAMBIO_USD, resolveCurrencySymbol } from "../features/backoffice/utils/currency.js";
 import { pickPortalTagline } from "../features/backoffice/utils/portalConfig.js";
 import { canAccessView, getAllowedViewIds } from "../features/backoffice/utils/auth.js";
 import { displayUserName } from "../utils/authUser.js";
 import {
   CashierView,
   DashboardView,
+  DeliveryView,
   KitchenView,
   OrdersView,
   ProductsView,
@@ -27,6 +28,7 @@ const TITLES = {
   dashboard: "Dashboard",
   orders: "Gestion de pedidos",
   tables: "Gestion de mesas",
+  delivery: "Delivery",
   products: "Gestion de productos",
   providers: "Proveedores",
   kitchen: "Cocina",
@@ -83,6 +85,7 @@ export function AuthHome() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeView, setActiveView] = useState("dashboard");
   const [currencySymbol, setCurrencySymbol] = useState("C$");
+  const [tipoCambio, setTipoCambio] = useState(DEFAULT_TIPO_CAMBIO_USD);
   const [portalTagline, setPortalTagline] = useState("");
   const [lowStockItems, setLowStockItems] = useState([]);
   const allowedViewIds = useMemo(() => getAllowedViewIds(user), [user]);
@@ -95,13 +98,15 @@ export function AuthHome() {
 
   useEffect(() => {
     let mounted = true;
-    backofficeApi
-      .configuraciones()
-      .then((data) => {
+    Promise.all([backofficeApi.configuraciones(), backofficeApi.configuracionTipoCambio().catch(() => null)])
+      .then(([data, tc]) => {
         if (!mounted) return;
         const list = Array.isArray(data) ? data : data?.items || [];
         setCurrencySymbol(resolveCurrencySymbol(list));
         setPortalTagline(pickPortalTagline(list));
+        const tcValue = Number(tc?.tipoCambioDolar ?? tc?.TipoCambioDolar ?? tc?.valor ?? 0);
+        if (Number.isFinite(tcValue) && tcValue > 0) setTipoCambio(tcValue);
+        else setTipoCambio(DEFAULT_TIPO_CAMBIO_USD);
       })
       .catch(() => {});
     return () => {
@@ -196,6 +201,7 @@ export function AuthHome() {
     if (activeView === "settings") return SettingsView;
     if (activeView === "orders") return OrdersView;
     if (activeView === "tables") return TablesView;
+    if (activeView === "delivery") return DeliveryView;
     if (activeView === "reports") return ReportsView;
     return DashboardView;
   }, [activeView]);
@@ -268,7 +274,7 @@ export function AuthHome() {
               </div>
             </header>
           )}
-          <ActiveView currencySymbol={currencySymbol} />
+          <ActiveView currencySymbol={currencySymbol} exchangeRate={tipoCambio} />
         </section>
       </div>
     </main>

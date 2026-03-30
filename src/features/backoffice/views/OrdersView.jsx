@@ -6,6 +6,7 @@ import { PAGINATION } from "../constants/pagination.js";
 import { formatCurrency } from "../utils/currency.js";
 import { getApiUrl } from "../../../api/config.js";
 import { getToken } from "../../../api/token.js";
+import { openBackendPrintHtml, openBackendPrintUrl } from "../utils/backofficePrint.js";
 import { useAuth } from "../../../contexts/AuthContext.jsx";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
@@ -334,78 +335,6 @@ export function OrdersView({ currencySymbol = "C$" }) {
       snackbar.error(err.message || "No se pudo editar el pedido.");
     } finally {
       setBusyAction(false);
-    }
-  };
-
-  const printBlobInHiddenFrame = (blob) =>
-    new Promise((resolve) => {
-      try {
-        const blobUrl = URL.createObjectURL(blob);
-        const iframe = document.createElement("iframe");
-        iframe.style.position = "fixed";
-        iframe.style.right = "0";
-        iframe.style.bottom = "0";
-        iframe.style.width = "0";
-        iframe.style.height = "0";
-        iframe.style.border = "0";
-        iframe.src = blobUrl;
-        iframe.onload = () => {
-          try {
-            setTimeout(() => {
-              try {
-                iframe.contentWindow?.focus();
-                iframe.contentWindow?.print();
-              } finally {
-                setTimeout(() => {
-                  URL.revokeObjectURL(blobUrl);
-                  iframe.remove();
-                  resolve(true);
-                }, 1500);
-              }
-            }, 120);
-          } catch {
-            URL.revokeObjectURL(blobUrl);
-            iframe.remove();
-            resolve(false);
-          }
-        };
-        iframe.onerror = () => {
-          URL.revokeObjectURL(blobUrl);
-          iframe.remove();
-          resolve(false);
-        };
-        document.body.appendChild(iframe);
-      } catch {
-        resolve(false);
-      }
-    });
-
-  const openBackendPrintUrl = async (url) => {
-    if (!url) return false;
-    const token = getToken();
-    const resolved = url?.startsWith("http") ? url : `${getApiUrl()}${url?.startsWith("/") ? url : `/${url}`}`;
-    try {
-      const res = await fetch(resolved, {
-        method: "GET",
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-      if (!res.ok) return false;
-      const blob = await res.blob();
-      return await printBlobInHiddenFrame(blob);
-    } catch {
-      return false;
-    }
-  };
-
-  const openBackendPrintHtml = async (html) => {
-    if (!html || typeof html !== "string") return false;
-    try {
-      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-      return await printBlobInHiddenFrame(blob);
-    } catch {
-      return false;
     }
   };
 

@@ -27,12 +27,24 @@ export function isMeseroUser(user) {
 
 export function getAllowedViewIds(user) {
   if (isAdminUser(user)) {
-    return ["dashboard", "orders", "tables", "products", "providers", "kitchen", "cashier", "users", "settings", "reports"];
+    return [
+      "dashboard",
+      "orders",
+      "tables",
+      "delivery",
+      "products",
+      "providers",
+      "kitchen",
+      "cashier",
+      "users",
+      "settings",
+      "reports",
+    ];
   }
   if (isMeseroUser(user)) {
-    return ["dashboard", "tables", "orders"];
+    return ["dashboard", "tables", "delivery", "orders"];
   }
-  return ["dashboard", "tables"];
+  return ["dashboard", "tables", "delivery"];
 }
 
 export function canAccessView(user, viewId) {
