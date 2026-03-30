@@ -68,7 +68,6 @@ export function SettingsView() {
       await loadAll();
       snackbar.success("Tipo de cambio actualizado.");
     } catch (e) {
-      setError(e.message || "No se pudo actualizar tipo de cambio.");
       snackbar.error(e.message || "No se pudo actualizar tipo de cambio.");
     } finally {
       setSaving(false);
@@ -94,7 +93,6 @@ export function SettingsView() {
       setModalOpen(false);
       snackbar.success("Configuración guardada.");
     } catch (e2) {
-      setError(e2.message || "No se pudo guardar la configuración.");
       snackbar.error(e2.message || "No se pudo guardar la configuración.");
     } finally {
       setSaving(false);
@@ -156,7 +154,6 @@ export function SettingsView() {
       setTemplateModalOpen(false);
       snackbar.success("Plantilla guardada.");
     } catch (e2) {
-      setError(e2.message || "No se pudo guardar plantilla.");
       snackbar.error(e2.message || "No se pudo guardar plantilla.");
     } finally {
       setSaving(false);
@@ -171,7 +168,6 @@ export function SettingsView() {
       await reloadTemplates();
       snackbar.success("Plantilla eliminada.");
     } catch (e) {
-      setError(e.message || "No se pudo eliminar plantilla.");
       snackbar.error(e.message || "No se pudo eliminar plantilla.");
     } finally {
       setSaving(false);
@@ -186,7 +182,6 @@ export function SettingsView() {
       await reloadTemplates();
       snackbar.success("Plantilla marcada como predeterminada.");
     } catch (e) {
-      setError(e.message || "No se pudo marcar como predeterminada.");
       snackbar.error(e.message || "No se pudo marcar como predeterminada.");
     } finally {
       setSaving(false);

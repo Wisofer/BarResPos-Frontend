@@ -97,7 +97,6 @@ export function KitchenView() {
       await loadKitchen();
     } catch (e) {
       const msg = e?.message || "No se pudo actualizar estado de cocina.";
-      setError(msg);
       snackbar.error(msg);
     } finally {
       setBusyId(null);

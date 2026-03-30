@@ -100,7 +100,6 @@ export function ProductCategoriesView({ onBackToProducts, onOpenProducts, onCate
       });
       setModalOpen(true);
     } catch (e) {
-      setError(e.message || "No se pudo cargar la categoría.");
       snackbar.error(e.message || "No se pudo cargar la categoría.");
     } finally {
       setSaving(false);
@@ -126,7 +125,6 @@ export function ProductCategoriesView({ onBackToProducts, onOpenProducts, onCate
       setModalOpen(false);
       snackbar.success("Categoría guardada.");
     } catch (e2) {
-      setError(e2.message || "No se pudo guardar.");
       snackbar.error(e2.message || "No se pudo guardar.");
     } finally {
       setSaving(false);
@@ -149,7 +147,6 @@ export function ProductCategoriesView({ onBackToProducts, onOpenProducts, onCate
       onCategoriesMutated?.();
       snackbar.success("Categoría desactivada.");
     } catch (e) {
-      setError(e.message || "No se pudo desactivar.");
       snackbar.error(e.message || "No se pudo desactivar.");
     } finally {
       setSaving(false);
@@ -165,7 +162,6 @@ export function ProductCategoriesView({ onBackToProducts, onOpenProducts, onCate
       onCategoriesMutated?.();
       snackbar.success("Categoría desactivada (eliminar).");
     } catch (e) {
-      setError(e.message || "No se pudo eliminar.");
       snackbar.error(e.message || "No se pudo eliminar.");
     } finally {
       setSaving(false);

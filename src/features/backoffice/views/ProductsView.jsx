@@ -309,7 +309,6 @@ export function ProductsView({ currencySymbol = "C$" }) {
       snackbar.success("Movimiento de inventario aplicado.");
       window.dispatchEvent(new CustomEvent("barrest-inventory-updated"));
     } catch (e2) {
-      setError(e2.message || "No se pudo aplicar el movimiento.");
       snackbar.error(e2.message || "No se pudo aplicar el movimiento.");
     } finally {
       setSaving(false);
@@ -450,14 +449,13 @@ export function ProductsView({ currencySymbol = "C$" }) {
       }
       window.dispatchEvent(new CustomEvent("barrest-inventory-updated"));
     } catch (e2) {
-      setError(e2.message || "No se pudo guardar el producto.");
       snackbar.error(e2.message || "No se pudo guardar el producto.");
     } finally {
       setSaving(false);
     }
   };
 
-  const removeProduct = async (id, nombre) => {
+  const removeProduct = async (id) => {
     setSaving(true);
     setError("");
     try {
@@ -466,7 +464,6 @@ export function ProductsView({ currencySymbol = "C$" }) {
       snackbar.success("Producto eliminado/desactivado.");
       window.dispatchEvent(new CustomEvent("barrest-inventory-updated"));
     } catch (e) {
-      setError(e.message || "No se pudo eliminar el producto.");
       snackbar.error(e.message || "No se pudo eliminar el producto.");
     } finally {
       setSaving(false);
@@ -511,7 +508,6 @@ export function ProductsView({ currencySymbol = "C$" }) {
       snackbar.success("Excel de productos descargado.");
     } catch (e) {
       const msg = e?.message || "No se pudo exportar productos.";
-      setError(msg);
       snackbar.error(msg);
     } finally {
       setSaving(false);
@@ -539,7 +535,6 @@ export function ProductsView({ currencySymbol = "C$" }) {
             await loadProducts(id);
             await reloadCategoriesOnly();
           } catch (e) {
-            setError(e.message || "No se pudo cargar productos.");
             snackbar.error(e.message || "No se pudo cargar productos.");
           }
         }}
@@ -662,7 +657,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
               <div className="mt-3">
                 <p className="text-base font-bold text-amber-600">{formatCurrency(p.precioVenta ?? p.precio ?? 0, currencySymbol)}</p>
                 <p className="mt-0.5 text-[11px] text-slate-500">Compra: {formatCurrency(p.precioCompra ?? 0, currencySymbol)}</p>
-                <p className="mt-1 text-xs text-slate-600">{Boolean(p.controlarStock) ? `Stock: ${stock}` : "Sin control de stock"}</p>
+                <p className="mt-1 text-xs text-slate-600">{p.controlarStock ? `Stock: ${stock}` : "Sin control de stock"}</p>
                 <div className="mt-2 flex items-center gap-1.5">
                   <button
                     onClick={() => openEdit(p.id)}
@@ -1256,7 +1251,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
         open={confirmAction.open}
         onClose={() => setConfirmAction({ open: false, type: "", id: null, name: "" })}
         onConfirm={async () => {
-          if (confirmAction.type === "product" && confirmAction.id) await removeProduct(confirmAction.id, confirmAction.name);
+          if (confirmAction.type === "product" && confirmAction.id) await removeProduct(confirmAction.id);
         }}
         title="Confirmar eliminación"
         message={

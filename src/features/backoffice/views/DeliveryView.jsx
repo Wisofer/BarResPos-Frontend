@@ -32,6 +32,17 @@ import { getPedidoMontoNumeric, mapBackendItemsToCart, posCartToModalLines } fro
 import { buildDeliveryPedidoBody, mapDeliveryListRow } from "../utils/deliveryPedido.js";
 import { fetchPosProductosYCategorias } from "../utils/posCatalogLoad.js";
 import {
+  pagoDescuentoAtribuidoCordobas,
+  pagoDescuentoMotivo,
+  pagoFecha,
+  pagoMontoNetoCobradoCordobas,
+  pagoTipo,
+  pedidoDescuentoCobroCordobas,
+  pedidoPagosLista,
+  pedidoSubtotalConsumoCordobas,
+  pedidoTotalNetoCobradoCordobas,
+} from "../utils/pedidoCobro.js";
+import {
   buildOpcionesResumenLocal,
   genPosLineId,
   getSingleGrupoOpcionesForPosInline,
@@ -43,6 +54,30 @@ import {
 } from "../utils/productoOpciones.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { useDebouncedListRefetch } from "../hooks/useDebouncedListRefetch.js";
+
+function statusClass(status) {
+  if (status === "Listo") return "bg-emerald-50 text-emerald-700";
+  if (status === "Entregado") return "bg-blue-50 text-blue-700";
+  if (status === "Despacho") return "bg-violet-50 text-violet-700";
+  if (status === "Pagado") return "bg-emerald-50 text-emerald-700";
+  if (status === "Cancelado") return "bg-rose-50 text-rose-700";
+  return "bg-amber-50 text-amber-700";
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  const date = d.toLocaleDateString("es-NI");
+  const time = d.toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return { date, time };
+}
+
+function formatDateTimeLabel(value) {
+  const parsed = formatDateTime(value);
+  if (parsed === "-") return "-";
+  return `${parsed.date} ${parsed.time}`;
+}
 
 export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
   const snackbar = useSnackbar();
@@ -70,6 +105,8 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
   const [saleModalLines, setSaleModalLines] = useState([]);
   const [saleBackendTotal, setSaleBackendTotal] = useState(null);
   const [saleProcessing, setSaleProcessing] = useState(false);
+  const [detailOrder, setDetailOrder] = useState(null);
+  const [showDetail, setShowDetail] = useState(false);
 
   useEffect(() => {
     deliveryPedidoIdRef.current = deliveryPedidoId;
@@ -322,6 +359,40 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
     }
   };
 
+  const viewSavedDelivery = async (row) => {
+    setActionBusy(true);
+    try {
+      const detail = await backofficeApi.getDeliveryPedido(row.pedidoId);
+      setDetailOrder(detail);
+      setShowDetail(true);
+    } catch (e) {
+      snackbar.error(e?.message || "No se pudo cargar el detalle del pedido.");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const openBuilderFromDetail = async () => {
+    if (!detailOrder) return;
+    const estado = String(detailOrder?.estado ?? detailOrder?.Estado ?? "");
+    if (estado === "Pagado" || estado === "Cancelado") {
+      snackbar.info("Este pedido no se puede editar.");
+      return;
+    }
+    setActionBusy(true);
+    try {
+      applyPedidoDetail(detailOrder);
+      setShowDetail(false);
+      setOpenBuilder(true);
+      setSearch("");
+      setCategory("");
+      setDeliveryInlineOpcionesProduct(null);
+      await ensureCatalogLoaded();
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   const cancelSavedDelivery = async (row) => {
     if (row.estado === "Pagado") {
       snackbar.info("Un pedido pagado no se cancela desde aquí.");
@@ -510,6 +581,228 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
     }
   };
 
+  const printDeliveryFromDetail = async (detail) => {
+    const pid = Number(detail?.id ?? detail?.Id);
+    if (!Number.isFinite(pid)) {
+      snackbar.error("No se encontró el ID del pedido.");
+      return;
+    }
+    setActionBusy(true);
+    try {
+      const pre = await backofficeApi.deliveryPedidoPrecuenta(pid);
+      const urlPrecuenta =
+        pre?.urlImpresionPrecuenta ??
+        pre?.UrlImpresionPrecuenta ??
+        pre?.urlImpresion ??
+        pre?.UrlImpresion ??
+        null;
+      const htmlPrecuenta = pre?.htmlPrecuenta ?? pre?.HtmlPrecuenta ?? null;
+
+      if (urlPrecuenta && (await openBackendPrintUrl(urlPrecuenta))) {
+        snackbar.info("Pre-cuenta lista para imprimir.");
+        return;
+      }
+      if (htmlPrecuenta && (await openBackendPrintHtml(htmlPrecuenta))) {
+        snackbar.info("Pre-cuenta lista para imprimir.");
+        return;
+      }
+      try {
+        const rawHtml = await backofficeApi.deliveryPedidoPrecuentaHtml(pid);
+        const htmlDirect = typeof rawHtml === "string" ? rawHtml : rawHtml?.html ?? rawHtml?.Html ?? null;
+        if (htmlDirect && (await openBackendPrintHtml(htmlDirect))) {
+          snackbar.info("Pre-cuenta lista para imprimir.");
+          return;
+        }
+      } catch {
+        // sin fallback adicional; mantenemos mismo canal de impresión backend
+      }
+      snackbar.error("No se pudo obtener la pre-cuenta para imprimir.");
+    } catch (e) {
+      snackbar.error(e?.message || "No se pudo imprimir la cuenta.");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  if (showDetail && detailOrder) {
+    const createdAtLabel = formatDateTimeLabel(detailOrder.fechaCreacion ?? detailOrder.createdAt ?? detailOrder.CreatedAt);
+    const paidAtLabel = formatDateTimeLabel(detailOrder.fechaPagado ?? detailOrder.FechaPagado);
+    const listoAtLabel = ["Listo", "Servido", "Entregado", "Pagado"].includes(String(detailOrder.estado || ""))
+      ? paidAtLabel
+      : "-";
+    const items = Array.isArray(detailOrder.items ?? detailOrder.Items) ? detailOrder.items ?? detailOrder.Items : [];
+    const subtotalLines = items.reduce((acc, it) => acc + Number(it.monto ?? it.Monto ?? 0), 0);
+    const subConsumoDetalle = pedidoSubtotalConsumoCordobas(detailOrder) || subtotalLines;
+    const descCobroDetalle = pedidoDescuentoCobroCordobas(detailOrder);
+    const netoCobradoDetalle = pedidoTotalNetoCobradoCordobas(detailOrder);
+    const pagosDetalle = pedidoPagosLista(detailOrder);
+    const estadoDetalle = String(detailOrder.estado ?? detailOrder.Estado ?? "");
+    const codigo = detailOrder.codigo ?? detailOrder.Codigo ?? `#${detailOrder.id ?? detailOrder.Id}`;
+    return (
+      <div className="min-w-0 max-w-full space-y-4">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Detalle de pedido</p>
+              <h2 className="mt-1 text-xl font-bold text-slate-800">{codigo}</h2>
+              <p className="text-sm text-slate-500">Vista completa del pedido delivery y sus productos.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDetail(false);
+                  setDetailOrder(null);
+                }}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <ArrowLeft className="h-3.5 w-3.5 shrink-0" />
+                Volver
+              </button>
+              <button
+                type="button"
+                onClick={() => void printDeliveryFromDetail(detailOrder)}
+                disabled={actionBusy}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                <Printer className="h-3.5 w-3.5 shrink-0" />
+                Imprimir
+              </button>
+              <button
+                type="button"
+                onClick={() => void openBuilderFromDetail()}
+                disabled={actionBusy || estadoDetalle === "Pagado" || estadoDetalle === "Cancelado"}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+              >
+                <Pencil className="h-3.5 w-3.5 shrink-0" />
+                Editar
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[1.7fr_1fr]">
+          <section className="space-y-4">
+            <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="mb-3 text-sm font-semibold text-slate-800">Informacion del Pedido</h3>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <article className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-xs text-slate-500">Numero</p><p className="font-semibold text-slate-800">{codigo}</p></article>
+                <article className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-xs text-slate-500">Fecha y Hora</p><p className="font-semibold text-slate-800">{createdAtLabel}</p></article>
+                <article className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-xs text-slate-500">Origen</p><p className="font-semibold text-slate-800">Delivery</p></article>
+                <article className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-xs text-slate-500">Cliente</p><p className="font-semibold text-slate-800">{detailOrder.clienteNombre ?? detailOrder.ClienteNombre ?? "-"}</p></article>
+                <article className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-xs text-slate-500">Telefono</p><p className="font-semibold text-slate-800">{detailOrder.clienteTelefono ?? detailOrder.ClienteTelefono ?? "-"}</p></article>
+                <article className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-xs text-slate-500">Estado</p><span className={`rounded-md px-2 py-1 text-xs font-medium ${statusClass(estadoDetalle || "Pendiente")}`}>{estadoDetalle || "Pendiente"}</span></article>
+                <article className="rounded-lg border border-slate-200 bg-slate-50 p-3 sm:col-span-2 xl:col-span-3"><p className="text-xs text-slate-500">Direccion / observaciones</p><p className="font-medium text-slate-700">{detailOrder.clienteDireccion ?? detailOrder.ClienteDireccion ?? detailOrder.observaciones ?? detailOrder.Observaciones ?? "-"}</p></article>
+              </div>
+            </article>
+
+            <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="mb-3 text-sm font-semibold text-slate-800">Productos del Pedido</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-[760px] w-full text-sm">
+                  <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold">Producto</th>
+                      <th className="px-3 py-2 font-semibold">Cantidad</th>
+                      <th className="px-3 py-2 font-semibold">Precio Unit.</th>
+                      <th className="px-3 py-2 font-semibold">Subtotal</th>
+                      <th className="px-3 py-2 font-semibold">Notas</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white">
+                    {items.map((it, idx) => (
+                      <tr key={it.id ?? it.Id ?? `${it.servicioId ?? it.ServicioId ?? "it"}-${idx}`}>
+                        <td className="px-3 py-2"><p className="font-medium text-slate-800">{it.servicio ?? it.Servicio ?? it.producto ?? it.Producto ?? "-"}</p></td>
+                        <td className="px-3 py-2 text-slate-700">{it.cantidad ?? it.Cantidad ?? 0}</td>
+                        <td className="px-3 py-2 text-slate-700">{formatCurrency(it.precioUnitario ?? it.PrecioUnitario ?? 0, currencySymbol)}</td>
+                        <td className="px-3 py-2 font-semibold text-slate-800">{formatCurrency(it.monto ?? it.Monto ?? 0, currencySymbol)}</td>
+                        <td className="px-3 py-2 text-slate-700">{it.notas ?? it.Notas ?? "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={3} className="px-3 py-2 text-right text-sm font-semibold text-slate-700">Total consumo (subtotal):</td>
+                      <td className="px-3 py-2 text-sm font-bold text-slate-900">{formatCurrency(subConsumoDetalle, currencySymbol)}</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </article>
+          </section>
+
+          <section className="space-y-4">
+            <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="mb-3 text-sm font-semibold text-slate-800">Resumen (cobro)</h3>
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">Subtotal consumo</span>
+                  <span className="font-semibold text-slate-800">{formatCurrency(subConsumoDetalle, currencySymbol)}</span>
+                </div>
+                {descCobroDetalle > 0.0001 && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500">Descuento en cobro</span>
+                    <span className="font-semibold text-amber-800">−{formatCurrency(descCobroDetalle, currencySymbol)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                  <span className="text-slate-600">Total pagado (neto)</span>
+                  <span className="font-bold text-emerald-900">
+                    {estadoDetalle === "Pagado" && netoCobradoDetalle != null ? formatCurrency(netoCobradoDetalle, currencySymbol) : "—"}
+                  </span>
+                </div>
+              </div>
+            </article>
+            {pagosDetalle.length > 0 && (
+              <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h3 className="mb-3 text-sm font-semibold text-slate-800">Pagos</h3>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-xs">
+                    <thead className="border-b border-slate-200 text-left text-slate-500">
+                      <tr>
+                        <th className="py-1.5 pr-2 font-medium">Fecha</th>
+                        <th className="py-1.5 pr-2 font-medium">Tipo</th>
+                        <th className="py-1.5 pr-2 font-medium text-right">Neto ({currencySymbol})</th>
+                        <th className="py-1.5 font-medium text-right">Desc. atrib.</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      {pagosDetalle.map((pg, idx) => {
+                        const pid = pg.id ?? pg.Id ?? `pago-${idx}`;
+                        const netoP = pagoMontoNetoCobradoCordobas(pg);
+                        const descA = pagoDescuentoAtribuidoCordobas(pg);
+                        const motivo = pagoDescuentoMotivo(pg);
+                        return (
+                          <tr key={pid}>
+                            <td className="py-1.5 pr-2 whitespace-nowrap">{formatDateTimeLabel(pagoFecha(pg))}</td>
+                            <td className="py-1.5 pr-2">{pagoTipo(pg)}</td>
+                            <td className="py-1.5 pr-2 text-right font-medium">{netoP != null ? formatCurrency(netoP, currencySymbol) : "—"}</td>
+                            <td className="py-1.5 text-right" title={motivo || undefined}>
+                              {descA > 0.0001 ? `−${formatCurrency(descA, currencySymbol)}` : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </article>
+            )}
+            <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="mb-3 text-sm font-semibold text-slate-800">Fechas</h3>
+              <div className="space-y-2 text-sm text-slate-700">
+                <p>Creado: {createdAtLabel}</p>
+                <p>Listo: {listoAtLabel}</p>
+                <p>Pagado: {paidAtLabel}</p>
+              </div>
+            </article>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   if (!openBuilder) {
     return (
       <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -582,7 +875,16 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                       })}
                     </td>
                     <td className="px-3 py-2">
-                      <div className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white p-0.5">
+                      <div className="inline-flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => void viewSavedDelivery(x)}
+                          disabled={actionBusy}
+                          title="Ver detalle"
+                          className="inline-flex items-center text-xs font-semibold text-sky-700 hover:text-sky-800 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          Ver detalle
+                        </button>
                         <button
                           type="button"
                           onClick={() => void editSavedDelivery(x)}

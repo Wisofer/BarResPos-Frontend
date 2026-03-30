@@ -78,7 +78,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   const [locations, setLocations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [, setError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedTable, setSelectedTable] = useState(null);
@@ -211,7 +211,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       setLocationForm({ id: null, nombre: "", descripcion: "", activo: true });
     } catch (e) {
       const msg = e?.message || "No se pudieron cargar ubicaciones.";
-      setError(msg);
       snackbar.error(msg);
     } finally {
       setSaving(false);
@@ -231,7 +230,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       });
     } catch (e) {
       const msg = e?.message || "No se pudo cargar ubicación.";
-      setError(msg);
       snackbar.error(msg);
     } finally {
       setSaving(false);
@@ -256,7 +254,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       snackbar.success(locationForm.id ? "Ubicación actualizada." : "Ubicación creada.");
     } catch (e) {
       const msg = e?.message || "No se pudo guardar ubicación.";
-      setError(msg);
       snackbar.error(msg);
     } finally {
       setSaving(false);
@@ -275,7 +272,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       snackbar.success("Ubicación eliminada/desactivada.");
     } catch (e) {
       const msg = e?.message || "No se pudo eliminar ubicación.";
-      setError(msg);
       snackbar.error(msg);
     } finally {
       setSaving(false);
@@ -296,7 +292,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       snackbar.success(nextActive ? "Ubicación reactivada." : "Ubicación desactivada.");
     } catch (e) {
       const msg = e?.message || "No se pudo actualizar estado de ubicación.";
-      setError(msg);
       snackbar.error(msg);
     } finally {
       setSaving(false);
@@ -340,14 +335,13 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       setFormOpen(false);
       snackbar.success(form.id ? "Mesa actualizada." : "Mesa creada.");
     } catch (e2) {
-      setError(e2.message || "No se pudo guardar la mesa.");
       snackbar.error(e2.message || "No se pudo guardar la mesa.");
     } finally {
       setSaving(false);
     }
   };
 
-  const changeStatus = async (id, estado) => {
+  const _changeStatus = async (id, estado) => {
     setSaving(true);
     setError("");
     try {
@@ -355,7 +349,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       await loadTables();
       snackbar.success("Estado de mesa actualizado.");
     } catch (e) {
-      setError(e.message || "No se pudo cambiar el estado.");
       snackbar.error(e.message || "No se pudo cambiar el estado.");
     } finally {
       setSaving(false);
@@ -383,7 +376,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       snackbar.success("Mesa reservada.");
     } catch (e) {
       const msg = e?.message || "No se pudo reservar la mesa.";
-      setError(msg);
       snackbar.error(msg);
     } finally {
       setPosActionBusy(false);
@@ -402,7 +394,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       snackbar.success("Reserva quitada; mesa libre.");
     } catch (e) {
       const msg = e?.message || "No se pudo quitar la reserva.";
-      setError(msg);
       snackbar.error(msg);
     } finally {
       setPosActionBusy(false);
@@ -417,14 +408,13 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       await loadTables();
       snackbar.success("Mesa eliminada/desactivada.");
     } catch (e) {
-      setError(e.message || "No se pudo eliminar la mesa.");
       snackbar.error(e.message || "No se pudo eliminar la mesa.");
     } finally {
       setSaving(false);
     }
   };
 
-  const openDetail = async (table) => {
+  const _openDetail = async (table) => {
     setSelectedTable(table);
     setDetailOpen(true);
     setActiveOrder(null);
@@ -478,7 +468,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       setPosProducts(catalog.products);
       setPosCategories(catalog.categories);
     } catch (e) {
-      setError(e.message || "No se pudo cargar productos para la mesa.");
       snackbar.error(e.message || "No se pudo cargar productos para la mesa.");
     } finally {
       setPosLoading(false);
@@ -607,7 +596,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
           }
           const stockConflict = isStockShortageConflict409(status, normalized, cajaCerrada);
           snackbar.error(stockConflict && !/^stock\b/i.test(msg) ? `Stock: ${msg}` : msg);
-          setError(msg);
         }
       })
       .catch(() => {})
@@ -787,7 +775,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       } catch (e) {
         // Silencioso: el carrito ya está vacío en UI, pero si backend no cancela mostramos un error.
         const msg = e?.message || "No se pudo liberar la mesa al limpiar el carrito.";
-        setError(msg);
         snackbar.error(msg);
       } finally {
         setPosActionBusy(false);
@@ -849,7 +836,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     } catch (e) {
       const msg = e?.message || "No se pudo cargar mesas para el traslado.";
       snackbar.error(msg);
-      setError(msg);
     }
   };
 
@@ -931,7 +917,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       );
     } catch (err) {
       const msg = err?.message || "No se pudo trasladar el pedido.";
-      setError(msg);
       snackbar.error(msg);
     } finally {
       setPosActionBusy(false);
@@ -1058,7 +1043,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
           /* ignore */
         }
       }
-      setError(msg);
       snackbar.error(stockConflict && !/^stock\b/i.test(msg) ? `Stock: ${msg}` : msg);
       throw e;
     } finally {
@@ -1082,7 +1066,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       await loadTables();
     } catch (e) {
       const msg = e?.message || "No se pudo cancelar el pedido.";
-      setError(msg);
       snackbar.error(msg);
     } finally {
       setPosActionBusy(false);
@@ -1118,7 +1101,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       setPosMobileTab("order");
     } catch (e) {
       const msg = e?.message || "No se pudo enviar a cocina.";
-      setError(msg);
       snackbar.error(msg);
     }
   };
@@ -1159,7 +1141,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       setSaleModalOpen(true);
     } catch (e) {
       const msg = e?.message || "No se pudo abrir cobro.";
-      setError(msg);
       snackbar.error(msg);
     }
   };
@@ -1225,7 +1206,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       await loadTables();
     } catch (e) {
       const msg = e?.message || "No se pudo registrar el pago.";
-      setError(msg);
       snackbar.error(msg);
     } finally {
       setSaleProcessing(false);
@@ -1316,7 +1296,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       snackbar.info("Pre-cuenta lista para imprimir (modo local).");
     } catch (e) {
       const msg = e?.message || "No se pudo imprimir la cuenta.";
-      setError(msg);
       snackbar.error(msg);
     }
   };

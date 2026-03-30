@@ -3,13 +3,32 @@ import { getApiUrl } from "../../../api/config.js";
 import { getToken } from "../../../api/token.js";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { formatCurrency } from "../utils/currency.js";
+import { reportApiDateRange } from "../utils/reportDates.js";
 import {
   cierreFechaRaw,
   cierreHistorialMontoPrincipal,
   cierreHistorialTotalVentas,
   cierreId,
 } from "../utils/caja.js";
-import { BarChart3, Boxes, CircleDollarSign, Tags, Users } from "lucide-react";
+import { BarChart3, Boxes, CircleDollarSign, Tags, Users, X } from "lucide-react";
+
+/** Etiqueta de categoría según lo que devuelve `/dashboard/resumen` (p. ej. nombreCategoria). */
+function categoriaReporteNombre(row, index) {
+  const r = row || {};
+  return (
+    r.nombreCategoria ??
+    r.NombreCategoria ??
+    r.categoriaNombre ??
+    r.CategoriaNombre ??
+    r.categoria ??
+    r.nombre ??
+    r.label ??
+    (r.categoriaId != null || r.CategoriaProductoId != null
+      ? `Categoría #${r.categoriaId ?? r.CategoriaProductoId}`
+      : null) ??
+    `Categoría ${index + 1}`
+  );
+}
 
 const reportCards = [
   {
@@ -63,14 +82,22 @@ export function ReportsView({ currencySymbol = "C$" }) {
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState(null);
   const [orders, setOrders] = useState([]);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailOrder, setDetailOrder] = useState(null);
+  const reportRange = {
+    desde: range?.desde?.trim() || undefined,
+    hasta: range?.hasta?.trim() || undefined,
+  };
 
   const downloadExcel = async (type) => {
     setExporting(true);
     setError("");
     try {
+      const apiRange = type === "resumen-ventas" ? reportRange : reportApiDateRange(range);
       const query = new URLSearchParams();
-      if (range.desde) query.set("desde", range.desde);
-      if (range.hasta) query.set("hasta", range.hasta);
+      if (apiRange.desde) query.set("desde", apiRange.desde);
+      if (apiRange.hasta) query.set("hasta", apiRange.hasta);
       if (type === "productos-top") query.set("top", String(range.top || 10));
       const url = `${getApiUrl()}/api/v1/reportes/${type}/excel${query.toString() ? `?${query.toString()}` : ""}`;
       const res = await fetch(url, {
@@ -100,21 +127,28 @@ export function ReportsView({ currencySymbol = "C$" }) {
     setLoading(true);
     setError("");
     try {
-      const query = { desde: range.desde || undefined, hasta: range.hasta || undefined };
+      const query = reportRange;
       if (reportId === "ventas") {
         const [data, pedidos] = await Promise.all([
           backofficeApi.reportesResumenVentas(query),
-          backofficeApi.listPedidos({ ...query, page: 1, pageSize: 100 }),
+          backofficeApi.reportesResumenVentasDetalle(query),
         ]);
         const details = Array.isArray(data?.desglosePorDia) ? data.desglosePorDia : data?.dias || [];
-        const ordersItems = Array.isArray(pedidos?.items) ? pedidos.items : [];
+        const ordersItems = Array.isArray(pedidos?.items) ? pedidos.items : Array.isArray(pedidos) ? pedidos : [];
         setRows(details);
         setOrders(
           ordersItems.map((o, i) => ({
-            id: o.id || i,
+            key: `${o.origen || o.origenPedido || "order"}-${o.id || i}-${i}`,
+            sourceId: o.id || o.Id || null,
             numero: o.numero || o.codigo || `#${1200 + i}`,
-            fecha: o.fecha || o.fechaCreacion || "",
-            mesa: o.mesa || o.mesaNumero || "-",
+            fecha: o.fecha || o.fechaCreacion || o.createdAt || "",
+            origen: o.origen || o.origenPedido || "-",
+            referencia:
+              o.mesa ||
+              o.mesaNumero ||
+              o.cliente ||
+              o.clienteNombre ||
+              (String(o.origen || o.origenPedido || "").toLowerCase() === "delivery" ? "Delivery" : "-"),
             mesero: o.mesero || o.usuario || "-",
             monto: Number(o.monto ?? o.total ?? 0),
           }))
@@ -125,11 +159,11 @@ export function ReportsView({ currencySymbol = "C$" }) {
           promedioTicket: data?.promedioTicket ?? data?.ticketPromedio ?? 0,
         });
       } else if (reportId === "productos-top") {
-        const data = await backofficeApi.reportesProductosTop({ ...query, top: range.top || 10 });
+        const data = await backofficeApi.reportesProductosTop({ ...reportRange, top: range.top || 10 });
         setRows(Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : []);
         setSummary(null);
       } else if (reportId === "meseros") {
-        const pedidos = await backofficeApi.listPedidos({ ...query, page: 1, pageSize: 500 });
+        const pedidos = await backofficeApi.listPedidos({ ...reportApiDateRange(range), page: 1, pageSize: 500 });
         const items = Array.isArray(pedidos?.items) ? pedidos.items : [];
         const grouped = items.reduce((acc, p) => {
           const key = p.mesero || p.usuario || "Sin mesero";
@@ -149,8 +183,12 @@ export function ReportsView({ currencySymbol = "C$" }) {
           promedioTicket: totalOrdenes > 0 ? totalVentas / totalOrdenes : 0,
         });
       } else if (reportId === "categorias") {
-        const data = await backofficeApi.dashboardResumen(query);
-        const categories = Array.isArray(data?.ventasPorCategoria) ? data.ventasPorCategoria : [];
+        const data = await backofficeApi.dashboardResumen(reportApiDateRange(range));
+        const categories = Array.isArray(data?.ventasPorCategoria)
+          ? data.ventasPorCategoria
+          : Array.isArray(data?.kpis?.ventasPorCategoria)
+            ? data.kpis.ventasPorCategoria
+            : [];
         setRows(categories);
         const totalVentas = categories.reduce((sum, c) => sum + Number(c.total || c.venta || 0), 0);
         setSummary({
@@ -190,6 +228,30 @@ export function ReportsView({ currencySymbol = "C$" }) {
       setError(e.message || "No se pudo cargar el reporte.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openOrderDetail = async (order) => {
+    const sourceId = Number(order?.sourceId);
+    if (!Number.isFinite(sourceId)) {
+      setError("No se encontró el identificador de la orden para ver detalle.");
+      return;
+    }
+    setDetailOpen(true);
+    setDetailLoading(true);
+    setDetailOrder(null);
+    try {
+      const origin = String(order?.origen || "").toLowerCase();
+      const detail =
+        origin === "delivery"
+          ? await backofficeApi.getDeliveryPedido(sourceId)
+          : await backofficeApi.getPedido(sourceId);
+      setDetailOrder(detail || null);
+    } catch (e) {
+      setError(e.message || "No se pudo cargar el detalle de la orden.");
+      setDetailOpen(false);
+    } finally {
+      setDetailLoading(false);
     }
   };
 
@@ -427,8 +489,8 @@ export function ReportsView({ currencySymbol = "C$" }) {
                         </thead>
                         <tbody>
                           {rows.map((row, i) => (
-                            <tr key={`${row.categoria || row.nombre || "cat"}-${i}`} className="border-b border-slate-100">
-                              <td className="px-2 py-2">{row.categoria || row.nombre || `Categoría ${i + 1}`}</td>
+                            <tr key={`cat-${row.categoriaId ?? row.CategoriaProductoId ?? i}-${i}`} className="border-b border-slate-100">
+                              <td className="px-2 py-2">{categoriaReporteNombre(row, i)}</td>
                               <td className="px-2 py-2 font-semibold">{formatCurrency(row.total ?? row.venta ?? 0, currencySymbol)}</td>
                             </tr>
                           ))}
@@ -483,19 +545,32 @@ export function ReportsView({ currencySymbol = "C$" }) {
                           <tr className="border-b border-slate-200 text-left text-slate-600">
                             <th className="px-2 py-2">Número</th>
                             <th className="px-2 py-2">Fecha</th>
-                            <th className="px-2 py-2">Mesa</th>
+                            <th className="px-2 py-2">Origen</th>
+                            <th className="px-2 py-2">Referencia</th>
                             <th className="px-2 py-2">Mesero</th>
                             <th className="px-2 py-2">Monto</th>
+                            <th className="px-2 py-2">Acciones</th>
                           </tr>
                         </thead>
                         <tbody>
                           {orders.map((o) => (
-                            <tr key={o.id} className="border-b border-slate-100">
+                            <tr key={o.key} className="border-b border-slate-100">
                               <td className="px-2 py-2">{o.numero}</td>
                               <td className="px-2 py-2">{String(o.fecha).slice(0, 10) || "-"}</td>
-                              <td className="px-2 py-2">{o.mesa}</td>
+                              <td className="px-2 py-2">{o.origen}</td>
+                              <td className="px-2 py-2">{o.referencia}</td>
                               <td className="px-2 py-2">{o.mesero}</td>
                               <td className="px-2 py-2">{formatCurrency(o.monto, currencySymbol)}</td>
+                              <td className="px-2 py-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openOrderDetail(o)}
+                                  className="inline-flex items-center text-xs font-semibold text-sky-700 hover:text-sky-800 hover:underline"
+                                  title="Ver detalle"
+                                >
+                                  Ver detalle
+                                </button>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -507,6 +582,63 @@ export function ReportsView({ currencySymbol = "C$" }) {
             </>
           )}
         </>
+      )}
+      {detailOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <article className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h4 className="text-base font-semibold text-slate-800">Detalle de orden</h4>
+              <button
+                type="button"
+                onClick={() => setDetailOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {detailLoading ? (
+              <p className="text-sm text-slate-500">Cargando detalle...</p>
+            ) : !detailOrder ? (
+              <p className="text-sm text-slate-500">Sin información para mostrar.</p>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                  <p><span className="font-medium text-slate-700">Número:</span> {detailOrder.numero || detailOrder.codigo || "-"}</p>
+                  <p><span className="font-medium text-slate-700">Estado:</span> {detailOrder.estado || "-"}</p>
+                  <p><span className="font-medium text-slate-700">Mesa/Ref:</span> {detailOrder.mesa || detailOrder.clienteNombre || "-"}</p>
+                  <p><span className="font-medium text-slate-700">Mesero:</span> {detailOrder.mesero || "-"}</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-left text-slate-600">
+                        <th className="px-2 py-2">Producto</th>
+                        <th className="px-2 py-2">Cantidad</th>
+                        <th className="px-2 py-2">P/U</th>
+                        <th className="px-2 py-2">Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {((detailOrder.items || detailOrder.Items || []).length === 0) && (
+                        <tr>
+                          <td colSpan={4} className="px-2 py-3 text-slate-500">Sin productos.</td>
+                        </tr>
+                      )}
+                      {(detailOrder.items || detailOrder.Items || []).map((it, i) => (
+                        <tr key={`${it.id || i}`} className="border-b border-slate-100">
+                          <td className="px-2 py-2">{it.servicio || it.producto || "-"}</td>
+                          <td className="px-2 py-2">{it.cantidad || 0}</td>
+                          <td className="px-2 py-2">{formatCurrency(it.precioUnitario || 0, currencySymbol)}</td>
+                          <td className="px-2 py-2">{formatCurrency(it.monto || it.subtotal || 0, currencySymbol)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </article>
+        </div>
       )}
     </div>
   );

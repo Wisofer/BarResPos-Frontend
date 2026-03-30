@@ -63,7 +63,6 @@ export function CashierView({ currencySymbol = "C$" }) {
     e.preventDefault();
     const monto = Number(montoInicial);
     if (!Number.isFinite(monto) || monto <= 0) {
-      setError("El monto inicial debe ser mayor a 0.");
       snackbar.error("El monto inicial debe ser mayor a 0.");
       return;
     }
@@ -76,7 +75,6 @@ export function CashierView({ currencySymbol = "C$" }) {
       setShowApertura(false);
       await loadAll(1);
     } catch (err) {
-      setError(err.message || "No se pudo abrir la caja.");
       snackbar.error(err.message || "No se pudo abrir la caja.");
     } finally {
       setProcessing(false);
@@ -96,7 +94,6 @@ export function CashierView({ currencySymbol = "C$" }) {
       setCierreForm({ montoReal: "", observaciones: "" });
       await loadAll(1);
     } catch (err) {
-      setError(err.message || "No se pudo cerrar la caja.");
       snackbar.error(err.message || "No se pudo cerrar la caja.");
     } finally {
       setProcessing(false);

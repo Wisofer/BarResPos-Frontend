@@ -99,6 +99,7 @@ export const backofficeApi = {
   deletePlantillaWhatsapp: (id) => api.delete(`/api/v1/configuraciones/plantillas-whatsapp/${id}`),
   marcarDefaultPlantillaWhatsapp: (id) => api.patch(`/api/v1/configuraciones/plantillas-whatsapp/${id}/marcar-default`, {}),
   reportesResumenVentas: (params) => api.get(`/api/v1/reportes/resumen-ventas${qs(params)}`),
+  reportesResumenVentasDetalle: (params) => api.get(`/api/v1/reportes/resumen-ventas/detalle${qs(params)}`),
   reportesProductosTop: (params) => api.get(`/api/v1/reportes/productos-top${qs(params)}`),
 
   /** Delivery: misma entidad orden/factura, origenPedido Delivery, sin mesa. */

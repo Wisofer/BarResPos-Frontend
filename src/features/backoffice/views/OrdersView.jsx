@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Check, Download, Eye, FilterX, Pencil, Printer, Search, X, XCircle } from "lucide-react";
+import { ArrowLeft, Check, Download, FilterX, Pencil, Printer, Search, X, XCircle } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { ListSkeleton } from "../components/index.js";
 import { PAGINATION } from "../constants/pagination.js";
@@ -11,6 +11,7 @@ import { useAuth } from "../../../contexts/AuthContext.jsx";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
 import { isAdminUser } from "../utils/auth.js";
+import { reportApiDateRange } from "../utils/reportDates.js";
 import {
   pagoDescuentoAtribuidoCordobas,
   pagoDescuentoMotivo,
@@ -89,8 +90,6 @@ export function OrdersView({ currencySymbol = "C$" }) {
   });
   const [filters, setFilters] = useState({
     estado: "",
-    mesaId: "",
-    meseroId: "",
     desde: "",
     hasta: "",
   });
@@ -100,12 +99,11 @@ export function OrdersView({ currencySymbol = "C$" }) {
     setLoading(true);
     setError("");
     try {
+      const apiRange = reportApiDateRange(filters);
       const filterParams = {
         estado: filters.estado || undefined,
-        mesaId: filters.mesaId || undefined,
-        meseroId: filters.meseroId || undefined,
-        desde: filters.desde || undefined,
-        hasta: filters.hasta || undefined,
+        desde: apiRange.desde,
+        hasta: apiRange.hasta,
       };
 
       const [resumen, listado] = await Promise.all([
@@ -166,14 +164,14 @@ export function OrdersView({ currencySymbol = "C$" }) {
     } finally {
       setLoading(false);
     }
-  }, [currencySymbol, filters.desde, filters.estado, filters.hasta, filters.mesaId, filters.meseroId, page]);
+  }, [currencySymbol, filters.desde, filters.estado, filters.hasta, page]);
 
-  const quickStates = useMemo(() => ["", "Pendiente", "Pagado", "En cocina", "Despacho", "Entregado"], []);
+  const quickStates = useMemo(() => ["", "Pendiente", "Pagado"], []);
   const filteredOrders = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     if (!q) return orders;
     return orders.filter((order) => {
-      const text = `${order.id} ${order.table} ${order.waiter}`.toLowerCase();
+      const text = `${order.id} ${order.numero || ""} ${order.table} ${order.waiter} ${order.mesaId || ""} ${order.meseroId || ""}`.toLowerCase();
       return text.includes(q);
     });
   }, [orders, searchTerm]);
@@ -189,19 +187,18 @@ export function OrdersView({ currencySymbol = "C$" }) {
 
   const clearFilters = () => {
     setPage(1);
-    setFilters({ estado: "", mesaId: "", meseroId: "", desde: "", hasta: "" });
+    setFilters({ estado: "", desde: "", hasta: "" });
   };
 
   const handleExport = async () => {
     setExporting(true);
     setError("");
     try {
+      const apiRange = reportApiDateRange(filters);
       const params = new URLSearchParams();
       if (filters.estado) params.set("estado", filters.estado);
-      if (filters.mesaId) params.set("mesaId", filters.mesaId);
-      if (filters.meseroId) params.set("meseroId", filters.meseroId);
-      if (filters.desde) params.set("desde", filters.desde);
-      if (filters.hasta) params.set("hasta", filters.hasta);
+      if (apiRange.desde) params.set("desde", apiRange.desde);
+      if (apiRange.hasta) params.set("hasta", apiRange.hasta);
 
       const url = `${getApiUrl()}/api/v1/pedidos/exportar-excel${params.toString() ? `?${params.toString()}` : ""}`;
       const token = getToken();
@@ -292,7 +289,6 @@ export function OrdersView({ currencySymbol = "C$" }) {
         setDetailOrder(refreshed);
       }
     } catch (err) {
-      setError(err.message || "No se pudo actualizar estado.");
       snackbar.error(err.message || "No se pudo actualizar estado.");
     } finally {
       setBusyAction(false);
@@ -331,7 +327,6 @@ export function OrdersView({ currencySymbol = "C$" }) {
       snackbar.success("Pedido actualizado correctamente.");
       await fetchData();
     } catch (err) {
-      setError(err.message || "No se pudo editar el pedido.");
       snackbar.error(err.message || "No se pudo editar el pedido.");
     } finally {
       setBusyAction(false);
@@ -907,7 +902,18 @@ export function OrdersView({ currencySymbol = "C$" }) {
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <article
+            className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 sm:col-span-2 xl:col-span-1"
+            title="Suma del neto cobrado en pedidos Pagados del filtro; alinea con caja/recibo"
+          >
+            <p className="text-xs text-emerald-700">Cobrado (neto)</p>
+            <p className="mt-1 text-xl font-extrabold text-emerald-900">
+              {cards.montoTotalCobradoNeto != null && Number.isFinite(cards.montoTotalCobradoNeto)
+                ? formatCurrency(cards.montoTotalCobradoNeto, currencySymbol)
+                : "—"}
+            </p>
+          </article>
           <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs text-slate-500">Pedidos totales</p>
             <p className="mt-1 text-lg font-bold text-slate-800">{cards.totalPedidos}</p>
@@ -916,29 +922,12 @@ export function OrdersView({ currencySymbol = "C$" }) {
             <p className="text-xs text-slate-500">Pagados</p>
             <p className="mt-1 text-lg font-bold text-slate-800">{cards.pagados}</p>
           </article>
-          <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p className="text-xs text-slate-500">Pendientes</p>
-            <p className="mt-1 text-lg font-bold text-slate-800">{cards.pendientes}</p>
-          </article>
-          <article className="rounded-xl border border-slate-200 bg-slate-50 p-3" title="Suma de montos de pedido (consumo), no el ingreso neto">
-            <p className="text-xs text-slate-500">Total consumo (pedidos)</p>
-            <p className="mt-1 text-lg font-bold text-slate-800">{formatCurrency(cards.montoTotal, currencySymbol)}</p>
-          </article>
-          <article
-            className="rounded-xl border border-slate-200 bg-slate-50 p-3"
-            title="Suma del neto cobrado en pedidos Pagados del filtro; alinea con caja/recibo"
-          >
-            <p className="text-xs text-slate-500">Cobrado (neto)</p>
-            <p className="mt-1 text-lg font-bold text-slate-800">
-              {cards.montoTotalCobradoNeto != null && Number.isFinite(cards.montoTotalCobradoNeto)
-                ? formatCurrency(cards.montoTotalCobradoNeto, currencySymbol)
-                : "—"}
-            </p>
-          </article>
-          <article className="rounded-xl border border-slate-200 bg-slate-50 p-3" title="Descuentos aplicados en el cobro">
-            <p className="text-xs text-slate-500">Descuentos en cobro</p>
-            <p className="mt-1 text-lg font-bold text-slate-800">{formatCurrency(cards.descuentoTotalCordobas, currencySymbol)}</p>
-          </article>
+          {Number(cards.descuentoTotalCordobas || 0) > 0 && (
+            <article className="rounded-xl border border-amber-200 bg-amber-50 p-3" title="Descuentos aplicados en el cobro">
+              <p className="text-xs text-amber-700">Descuentos en cobro</p>
+              <p className="mt-1 text-lg font-bold text-amber-900">{formatCurrency(cards.descuentoTotalCordobas, currencySymbol)}</p>
+            </article>
+          )}
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -956,28 +945,16 @@ export function OrdersView({ currencySymbol = "C$" }) {
           ))}
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-2 min-w-0 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="mt-4 grid grid-cols-1 gap-2 min-w-0 sm:grid-cols-2 xl:grid-cols-4">
           <div className="relative min-w-0 sm:col-span-2 xl:col-span-2">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
             <input
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar por pedido, mesa o mesero"
+              placeholder="Buscar por pedido, mesa, mesero o IDs"
               className="w-full min-w-0 rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm"
             />
           </div>
-          <input
-            value={filters.mesaId}
-            onChange={(e) => setFilters((prev) => ({ ...prev, mesaId: e.target.value }))}
-            placeholder="Mesa ID"
-            className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
-          <input
-            value={filters.meseroId}
-            onChange={(e) => setFilters((prev) => ({ ...prev, meseroId: e.target.value }))}
-            placeholder="Mesero ID"
-            className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
           <input
             type="date"
             value={filters.desde}
@@ -1052,9 +1029,9 @@ export function OrdersView({ currencySymbol = "C$" }) {
                           onClick={() => openDetail(order)}
                           disabled={busyAction}
                           title="Ver detalle"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          className="inline-flex items-center text-xs font-semibold text-sky-700 hover:text-sky-800 hover:underline disabled:opacity-50"
                         >
-                          <Eye className="h-3.5 w-3.5" />
+                          Ver detalle
                         </button>
                         {isAdmin && (
                           <button

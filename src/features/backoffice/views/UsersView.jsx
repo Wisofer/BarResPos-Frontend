@@ -87,7 +87,6 @@ export function UsersView() {
       setModalOpen(false);
       snackbar.success(form.id ? "Usuario actualizado." : "Usuario creado.");
     } catch (err) {
-      setError(err.message || "No se pudo guardar usuario.");
       snackbar.error(err.message || "No se pudo guardar usuario.");
     } finally {
       setSaving(false);
@@ -102,7 +101,6 @@ export function UsersView() {
       await loadUsers();
       snackbar.success("Usuario eliminado.");
     } catch (err) {
-      setError(err.message || "No se pudo eliminar usuario (admin no se puede eliminar).");
       snackbar.error(err.message || "No se pudo eliminar usuario.");
     } finally {
       setSaving(false);

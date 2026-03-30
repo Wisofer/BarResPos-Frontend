@@ -66,7 +66,6 @@ export function useProvidersCatalog() {
         });
         setModalOpen(true);
       } catch (e) {
-        setError(e.message || "No se pudo cargar el proveedor.");
         snackbar.error(e.message || "No se pudo cargar el proveedor.");
       } finally {
         setSaving(false);
@@ -98,7 +97,6 @@ export function useProvidersCatalog() {
         snackbar.success("Proveedor guardado.");
         dispatchProvidersUpdated();
       } catch (e2) {
-        setError(e2.message || "No se pudo guardar proveedor.");
         snackbar.error(e2.message || "No se pudo guardar proveedor.");
       } finally {
         setSaving(false);
@@ -117,7 +115,6 @@ export function useProvidersCatalog() {
         snackbar.success("Proveedor desactivado.");
         dispatchProvidersUpdated();
       } catch (e) {
-        setError(e.message || "No se pudo eliminar proveedor.");
         snackbar.error(e.message || "No se pudo eliminar proveedor.");
       } finally {
         setSaving(false);
