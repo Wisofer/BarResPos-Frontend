@@ -117,29 +117,5 @@ export async function openBackendPrintHtml(html) {
   }
 }
 
-/**
- * Abre documento backend en nueva pestaña: fetch autenticado + blob, o URL directa si falla.
- */
-export async function openAuthenticatedBackendBlobInNewTab(url) {
-  if (!url) return;
-  const resolved = resolveBackendAssetUrl(url);
-  const token = getToken();
-  try {
-    const res = await fetch(resolved, {
-      method: "GET",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-    if (res.ok) {
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      window.open(blobUrl, "_blank", "noopener,noreferrer");
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    } else {
-      window.open(resolved, "_blank", "noopener,noreferrer");
-    }
-  } catch {
-    window.open(resolved, "_blank", "noopener,noreferrer");
-  }
-}
+// Nota: antes existía `openAuthenticatedBackendBlobInNewTab`, pero ya no se usa
+// (los flujos de impresión usan iframe oculto con `printBlobInHiddenFrame`).
