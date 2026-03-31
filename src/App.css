@@ -127,3 +127,29 @@
     @apply font-sans;
     }
 }
+
+/* Oculta la barra de scroll pero mantiene el scroll (especialmente útil al hacer zoom). */
+.hide-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge legacy */
+}
+.hide-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* También ocultamos la scrollbar global del documento (body/html) para evitar el riel derecho. */
+html {
+  scrollbar-width: none;
+}
+html::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+body {
+  scrollbar-width: none;
+}
+body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}

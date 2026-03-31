@@ -249,7 +249,7 @@ export function AuthHome() {
           navItems={navItems}
         />
 
-        <section className="flex h-full min-h-0 min-w-0 flex-col gap-4 pb-24 sm:gap-6 lg:max-h-full lg:pb-0 lg:pr-2">
+        <section className="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-x-hidden overflow-y-auto hide-scrollbar pb-24 sm:gap-6 lg:max-h-full lg:pb-0 lg:pr-2">
           {showViewHeader && (
             <header className="shrink-0 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
@@ -276,7 +276,7 @@ export function AuthHome() {
               </div>
             </header>
           )}
-          <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+          <div className="flex min-h-0 flex-1 flex-col">
             <ActiveView currencySymbol={currencySymbol} exchangeRate={tipoCambio} />
           </div>
         </section>

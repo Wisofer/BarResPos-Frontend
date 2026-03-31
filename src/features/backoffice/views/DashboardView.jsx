@@ -274,11 +274,11 @@ export function DashboardView({ currencySymbol = "C$" }) {
               <h2 className="text-base font-semibold text-slate-800">Ingresos mensuales</h2>
               <Clock3 className="h-4 w-4 text-slate-400" />
             </div>
-            <div className="mt-3 h-52 min-w-0 overflow-x-auto rounded-lg border border-slate-100 bg-slate-50 p-2">
+            <div className="mt-3 h-52 min-w-0 overflow-hidden rounded-lg border border-slate-100 bg-slate-50 p-2">
               {salesSeries.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-xs text-slate-500">Sin datos de ingresos mensuales.</div>
               ) : (
-                <ResponsiveContainer className="min-w-[260px]" width="100%" height="100%">
+                <ResponsiveContainer className="min-w-0 w-full" width="100%" height="100%">
                   <BarChart data={salesSeries} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1">

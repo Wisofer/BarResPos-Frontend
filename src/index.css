@@ -32,6 +32,41 @@
   }
 }
 
+/* Oculta el riel de scrollbar pero mantiene el scroll.
+   Esto evita que se vea la barra lateral al hacer zoom (pasa mucho en Chrome). */
+.hide-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge legacy */
+}
+.hide-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+html {
+  scrollbar-width: none;
+}
+html::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+body {
+  scrollbar-width: none;
+}
+body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Fallback: oculta también scrollbars de cualquier contenedor. */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 @keyframes snackbar-enter {
   from {
     opacity: 0;
