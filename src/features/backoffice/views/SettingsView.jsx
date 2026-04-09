@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MessageSquareText, Pencil, Settings2 } from "lucide-react";
+import { KeyRound, MessageSquareText, Pencil, Settings2 } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { BackofficeDialog, BackofficeListSkeletonLoading } from "../components/index.js";
 import { useAuth } from "../../../contexts/AuthContext.jsx";
@@ -30,6 +30,7 @@ export function SettingsView() {
   const [alertasStockMinimo, setAlertasStockMinimo] = useState(true);
   const [sonidosNotificacion, setSonidosNotificacion] = useState(true);
   const [confirmDeleteTemplate, setConfirmDeleteTemplate] = useState({ open: false, id: null });
+  const [pinCancelacionInput, setPinCancelacionInput] = useState("");
 
   const loadAll = async () => {
     const [config, tc, tmpl] = await Promise.all([
@@ -39,6 +40,8 @@ export function SettingsView() {
     ]);
     const list = Array.isArray(config) ? config : config?.items || [];
     setSettings(list);
+    const pinCfg = list.find((s) => String(s?.clave || "") === "PinCancelacionPedidos");
+    setPinCancelacionInput(pinCfg?.valor != null ? String(pinCfg.valor) : "");
     const tcValue = tc?.tipoCambioDolar ?? tc?.TipoCambioDolar ?? tc?.valor ?? null;
     setTipoCambio(tcValue);
     setTipoCambioInput(tcValue ?? "");
@@ -58,6 +61,24 @@ export function SettingsView() {
   const reloadTemplates = async (activas = templatesActivas) => {
     const data = await backofficeApi.listPlantillasWhatsapp(activas === "" ? {} : { activas });
     setTemplates(Array.isArray(data) ? data : data?.items || []);
+  };
+
+  const savePinCancelacion = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await backofficeApi.upsertConfiguracion(
+        "PinCancelacionPedidos",
+        pinCancelacionInput,
+        "PIN global para cancelar pedidos (listado, POS y delivery)."
+      );
+      await loadAll();
+      snackbar.success("PIN de cancelación guardado.");
+    } catch (e) {
+      snackbar.error(e.message || "No se pudo guardar el PIN.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const saveTipoCambio = async () => {
@@ -189,7 +210,10 @@ export function SettingsView() {
   };
 
   if (loading) return <BackofficeListSkeletonLoading rows={5} />;
-  const normalizedSettings = settings.filter((s) => String(s?.clave || "").toLowerCase() !== "tipocambiodolar");
+  const normalizedSettings = settings.filter((s) => {
+    const k = String(s?.clave || "").toLowerCase();
+    return k !== "tipocambiodolar" && String(s?.clave || "") !== "PinCancelacionPedidos";
+  });
   return (
     <div className="min-w-0 max-w-full space-y-4">
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
@@ -220,6 +244,38 @@ export function SettingsView() {
                   {saving ? "..." : "OK"}
                 </button>
               </div>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/80 p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-amber-800" />
+              <p className="text-sm font-semibold text-slate-800">PIN cancelación de pedidos</p>
+            </div>
+            <p className="text-xs text-slate-600">
+              Código requerido para cancelar desde Pedidos, POS (mesas) y Delivery. Cambiá el valor por defecto en producción.
+            </p>
+            <div className="mt-2 flex flex-wrap items-end gap-2">
+              <label className="min-w-[140px] flex-1 text-xs font-medium text-slate-700">
+                PIN
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="new-password"
+                  value={pinCancelacionInput}
+                  onChange={(e) => setPinCancelacionInput(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm tracking-widest"
+                  placeholder="••••"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void savePinCancelacion()}
+                disabled={saving}
+                className="rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+              >
+                {saving ? "..." : "Guardar PIN"}
+              </button>
             </div>
           </div>
 

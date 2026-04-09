@@ -1,12 +1,60 @@
 import { getApiUrl } from "../../../api/config.js";
 import { getToken } from "../../../api/token.js";
 
-/** Resuelve URL del API (ruta relativa o absoluta). */
+/**
+ * Rutas de tickets HTML bajo API REST (ya no MVC):
+ * GET /api/v1/impresion/recibo/{pagoId}, /comanda/{ordenId}, /cocina/{ordenId}
+ * Legacy: /impresion/... → se normaliza a /api/v1/impresion/...
+ *
+ * En navegación directa (iframe src / window.open) no va Authorization; el backend
+ * acepta el mismo JWT en query: ?access_token=...
+ */
+function normalizeImpresionPathname(pathname) {
+  if (!pathname || typeof pathname !== "string") return pathname;
+  if (pathname.includes("/api/v1/impresion/")) return pathname;
+  if (pathname.startsWith("/impresion/")) {
+    return `/api/v1${pathname}`;
+  }
+  return pathname;
+}
+
+function isImpressionPathname(pathname) {
+  if (!pathname) return false;
+  return pathname.includes("/api/v1/impresion/") || pathname.startsWith("/impresion/");
+}
+
+/** Resuelve URL del API (ruta relativa o absoluta). Normaliza URLs de impresión al prefijo /api/v1/impresion/. */
 export function resolveBackendAssetUrl(url) {
   if (!url || typeof url !== "string") return "";
-  if (url.startsWith("http")) return url;
-  const path = url.startsWith("/") ? url : `/${url}`;
+  if (url.startsWith("http")) {
+    try {
+      const u = new URL(url);
+      const next = normalizeImpresionPathname(u.pathname);
+      if (next !== u.pathname) u.pathname = next;
+      return u.toString();
+    } catch {
+      return url;
+    }
+  }
+  let path = url.startsWith("/") ? url : `/${url}`;
+  path = normalizeImpresionPathname(path);
   return `${getApiUrl()}${path}`;
+}
+
+/** Añade access_token para rutas de impresión (iframe / window.open / fetch). */
+export function withImpressionAccessTokenQuery(absoluteUrl) {
+  if (!absoluteUrl || typeof absoluteUrl !== "string") return absoluteUrl;
+  const token = getToken();
+  if (!token) return absoluteUrl;
+  try {
+    const base = absoluteUrl.startsWith("http") ? undefined : getApiUrl();
+    const u = new URL(absoluteUrl, base);
+    if (!isImpressionPathname(u.pathname)) return absoluteUrl;
+    u.searchParams.set("access_token", token);
+    return u.toString();
+  } catch {
+    return absoluteUrl;
+  }
 }
 
 /**
@@ -85,9 +133,10 @@ export async function openBackendPrintUrl(url) {
   if (!url) return false;
   const token = getToken();
   const resolved = resolveBackendAssetUrl(url);
-  if (!resolved) return false;
+  const fetchUrl = withImpressionAccessTokenQuery(resolved);
+  if (!fetchUrl) return false;
   try {
-    const res = await fetch(resolved, {
+    const res = await fetch(fetchUrl, {
       method: "GET",
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

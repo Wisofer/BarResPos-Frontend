@@ -3,14 +3,13 @@ import { getApiUrl } from "../../../api/config.js";
 import { getToken } from "../../../api/token.js";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { formatCurrency } from "../utils/currency.js";
-import { reportApiDateRange } from "../utils/reportDates.js";
 import {
   cierreFechaRaw,
   cierreHistorialMontoPrincipal,
   cierreHistorialTotalVentas,
   cierreId,
 } from "../utils/caja.js";
-import { BarChart3, Boxes, CircleDollarSign, Tags, Users, X } from "lucide-react";
+import { BarChart3, Boxes, CircleDollarSign, History, Tags, Users, X } from "lucide-react";
 
 /** Etiqueta de categoría según lo que devuelve `/dashboard/resumen` (p. ej. nombreCategoria). */
 function categoriaReporteNombre(row, index) {
@@ -71,6 +70,14 @@ const reportCards = [
     color: "bg-amber-100 text-amber-600",
     button: "Ver reporte",
   },
+  {
+    id: "movimientos",
+    title: "Movimientos de Inventario",
+    description: "Registro de entradas, salidas y ajustes de stock de productos.",
+    icon: History,
+    color: "bg-red-100 text-red-600",
+    button: "Ver reporte",
+  },
 ];
 
 export function ReportsView({ currencySymbol = "C$" }) {
@@ -90,16 +97,49 @@ export function ReportsView({ currencySymbol = "C$" }) {
     hasta: range?.hasta?.trim() || undefined,
   };
 
-  const downloadExcel = async (type) => {
+  const downloadExcel = async (reportId) => {
     setExporting(true);
     setError("");
     try {
-      const apiRange = type === "resumen-ventas" ? reportRange : reportApiDateRange(range);
+      const apiRange = reportRange;
       const query = new URLSearchParams();
       if (apiRange.desde) query.set("desde", apiRange.desde);
       if (apiRange.hasta) query.set("hasta", apiRange.hasta);
-      if (type === "productos-top") query.set("top", String(range.top || 10));
-      const url = `${getApiUrl()}/api/v1/reportes/${type}/excel${query.toString() ? `?${query.toString()}` : ""}`;
+      
+      let endpoint = "";
+      let filename = "reporte.xlsx";
+
+      switch (reportId) {
+        case "ventas":
+          endpoint = "/api/v1/reportes/resumen-ventas/excel";
+          filename = `resumen-ventas-${new Date().toISOString().slice(0, 10)}.xlsx`;
+          break;
+        case "productos-top":
+          endpoint = "/api/v1/reportes/productos-top/excel";
+          query.set("top", String(range.top || 10));
+          filename = `productos-top-${new Date().toISOString().slice(0, 10)}.xlsx`;
+          break;
+        case "meseros":
+          endpoint = "/api/v1/reportes/ventas-por-mesero/excel";
+          filename = `ventas-por-mesero-${new Date().toISOString().slice(0, 10)}.xlsx`;
+          break;
+        case "categorias":
+          endpoint = "/api/v1/reportes/ventas-por-categoria/excel";
+          filename = `ventas-por-categoria-${new Date().toISOString().slice(0, 10)}.xlsx`;
+          break;
+        case "caja":
+          endpoint = "/api/v1/caja/historial/excel";
+          filename = `historial-caja-${new Date().toISOString().slice(0, 10)}.xlsx`;
+          break;
+        case "movimientos":
+          endpoint = "/api/v1/productos/movimientos/excel";
+          filename = `movimientos-inventario-${new Date().toISOString().slice(0, 10)}.xlsx`;
+          break;
+        default:
+          throw new Error("Tipo de reporte no soportado para Excel.");
+      }
+
+      const url = `${getApiUrl()}${endpoint}${query.toString() ? `?${query.toString()}` : ""}`;
       const res = await fetch(url, {
         method: "GET",
         headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
@@ -109,7 +149,7 @@ export function ReportsView({ currencySymbol = "C$" }) {
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = blobUrl;
-      a.download = type === "resumen-ventas" ? "reporte-resumen-ventas.xlsx" : "reporte-productos-top.xlsx";
+      a.download = filename;
       a.style.display = "none";
       document.body.appendChild(a);
       a.click();
@@ -193,12 +233,8 @@ export function ReportsView({ currencySymbol = "C$" }) {
             (totalOrdenes > 0 ? totalVentas / totalOrdenes : 0),
         });
       } else if (reportId === "categorias") {
-        const data = await backofficeApi.dashboardResumen(reportApiDateRange(range));
-        const categories = Array.isArray(data?.ventasPorCategoria)
-          ? data.ventasPorCategoria
-          : Array.isArray(data?.kpis?.ventasPorCategoria)
-            ? data.kpis.ventasPorCategoria
-            : [];
+        const data = await backofficeApi.reportesVentasPorCategoria(reportRange);
+        const categories = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
         setRows(categories);
         const totalVentas = categories.reduce((sum, c) => sum + Number(c.total || c.venta || 0), 0);
         setSummary({
@@ -231,6 +267,11 @@ export function ReportsView({ currencySymbol = "C$" }) {
           totalOrdenes: filtered.length,
           promedioTicket: 0,
         });
+      } else if (reportId === "movimientos") {
+        const data = await backofficeApi.movimientosProductos(reportRange);
+        const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+        setRows(items);
+        setSummary(null);
       }
     } catch (e) {
       setRows([]);
@@ -305,7 +346,9 @@ export function ReportsView({ currencySymbol = "C$" }) {
                         ? "bg-purple-600 hover:bg-purple-700"
                         : card.id === "categorias"
                           ? "bg-orange-600 hover:bg-orange-700"
-                          : "bg-amber-600 hover:bg-amber-700"
+                          : card.id === "movimientos"
+                            ? "bg-red-600 hover:bg-red-700"
+                            : "bg-amber-600 hover:bg-amber-700"
                 }`}
               >
                 {card.button}
@@ -322,7 +365,17 @@ export function ReportsView({ currencySymbol = "C$" }) {
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">
-                  {activeReport === "ventas" ? `Reporte de Ventas - ${new Date().toLocaleDateString("es-NI")}` : "Reporte de Productos Más Vendidos"}
+                  {activeReport === "ventas"
+                    ? `Reporte de Ventas - ${new Date().toLocaleDateString("es-NI")}`
+                    : activeReport === "productos-top"
+                    ? "Reporte de Productos Más Vendidos"
+                    : activeReport === "meseros"
+                    ? "Reporte de Ventas por Mesero"
+                    : activeReport === "categorias"
+                    ? "Reporte de Ventas por Categoría"
+                    : activeReport === "movimientos"
+                    ? "Reporte de Movimientos de Inventario"
+                    : "Reporte de Historial de Caja"}
                 </h3>
                 <p className="text-sm text-slate-500">Filtra por rango de fechas para consultar resultados.</p>
               </div>
@@ -379,8 +432,8 @@ export function ReportsView({ currencySymbol = "C$" }) {
                     Filtrar
                   </button>
                   <button
-                    onClick={() => downloadExcel(activeReport === "ventas" ? "resumen-ventas" : "productos-top")}
-                    disabled={exporting || (activeReport !== "ventas" && activeReport !== "productos-top")}
+                    onClick={() => downloadExcel(activeReport)}
+                    disabled={exporting}
                     className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
                   >
                     Exportar Excel
@@ -494,14 +547,16 @@ export function ReportsView({ currencySymbol = "C$" }) {
                         <thead>
                           <tr className="border-b border-slate-200 text-left text-slate-600">
                             <th className="px-2 py-2">Categoría</th>
-                            <th className="px-2 py-2">Total ventas</th>
+                            <th className="px-2 py-2 text-center">Items vendidos</th>
+                            <th className="px-2 py-2 text-right">Total ventas</th>
                           </tr>
                         </thead>
                         <tbody>
                           {rows.map((row, i) => (
                             <tr key={`cat-${row.categoriaId ?? row.CategoriaProductoId ?? i}-${i}`} className="border-b border-slate-100">
                               <td className="px-2 py-2">{categoriaReporteNombre(row, i)}</td>
-                              <td className="px-2 py-2 font-semibold">{formatCurrency(row.total ?? row.venta ?? 0, currencySymbol)}</td>
+                              <td className="px-2 py-2 text-center font-medium">{row.cantidad ?? row.totalArticulos ?? 0}</td>
+                              <td className="px-2 py-2 text-right font-semibold">{formatCurrency(row.total ?? row.venta ?? 0, currencySymbol)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -537,6 +592,55 @@ export function ReportsView({ currencySymbol = "C$" }) {
                               <td className="px-2 py-2 font-semibold">{formatCurrency(cierreHistorialTotalVentas(row), currencySymbol)}</td>
                             </tr>
                           ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </article>
+              )}
+              {activeReport === "movimientos" && (
+                <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <h4 className="mb-3 text-base font-semibold text-slate-800">Movimientos de inventario</h4>
+                  {rows.length === 0 ? (
+                    <p className="text-sm text-slate-500">Sin movimientos para el período seleccionado.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-200 text-left text-slate-600">
+                            <th className="px-2 py-2">Fecha</th>
+                            <th className="px-2 py-2">Producto</th>
+                            <th className="px-2 py-2">Tipo</th>
+                            <th className="px-2 py-2">Cant. Anterior</th>
+                            <th className="px-2 py-2">Variación</th>
+                            <th className="px-2 py-2">Cant. Nueva</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((row, i) => {
+                            const date = row.fecha || row.createdAt || "";
+                            const variation = Number(row.cantidad || 0);
+                            return (
+                              <tr key={`mov-${row.id || i}`} className="border-b border-slate-100">
+                                <td className="px-2 py-2 text-slate-500">{String(date).slice(0, 16).replace("T", " ")}</td>
+                                <td className="px-2 py-2 font-medium">{row.productoNombre || row.producto?.nombre || `Item #${row.productoId || i}`}</td>
+                                <td className="px-2 py-2">
+                                  <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                                    String(row.tipo).toLowerCase().includes("entrada") ? "bg-green-100 text-green-700" :
+                                    String(row.tipo).toLowerCase().includes("salida") ? "bg-red-100 text-red-700" :
+                                    "bg-blue-100 text-blue-700"
+                                  }`}>
+                                    {row.tipo || row.subtipo || "-"}
+                                  </span>
+                                </td>
+                                <td className="px-2 py-2">{row.cantidadAnterior ?? "-"}</td>
+                                <td className={`px-2 py-2 font-semibold ${variation > 0 ? "text-green-600" : variation < 0 ? "text-red-600" : "text-slate-600"}`}>
+                                  {variation > 0 ? "+" : ""}{variation}
+                                </td>
+                                <td className="px-2 py-2">{row.cantidadNueva ?? "-"}</td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

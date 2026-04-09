@@ -12,3 +12,4 @@ export { PosProductOpcionesModal } from "./PosProductOpcionesModal.jsx";
 export { PosInlineOpcionesPanel } from "./PosInlineOpcionesPanel.jsx";
 export { BackofficeDialog } from "./BackofficeDialog.jsx";
 export { BackofficeShellHeaderActions } from "./BackofficeShellHeaderActions.jsx";
+export { CancelPedidoPinModal } from "./CancelPedidoPinModal.jsx";

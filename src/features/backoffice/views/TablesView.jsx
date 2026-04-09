@@ -21,6 +21,7 @@ import {
   PosInlineOpcionesPanel,
   PosProductOpcionesModal,
   PosProcesarVentaModal,
+  CancelPedidoPinModal,
 } from "../components/index.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
@@ -100,7 +101,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   const posSyncChainRef = useRef(Promise.resolve());
   const posSyncPendingCountRef = useRef(0);
   const posCartRef = useRef([]);
-  const [posSyncIdleTick, setPosSyncIdleTick] = useState(0);
   const [form, setForm] = useState({
     id: null,
     numero: "",
@@ -127,6 +127,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   const [moveOrderOpen, setMoveOrderOpen] = useState(false);
   const [moveOrderTargetId, setMoveOrderTargetId] = useState("");
   const [moveOrderCandidates, setMoveOrderCandidates] = useState([]);
+  const [posCancelPinOpen, setPosCancelPinOpen] = useState(false);
   /** "zonas" | "plano" */
   const [mesasLayoutMode, setMesasLayoutMode] = useState("zonas");
   const isAdmin = isAdminUser(user);
@@ -601,9 +602,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       .catch(() => {})
       .finally(() => {
         posSyncPendingCountRef.current = Math.max(0, posSyncPendingCountRef.current - 1);
-        if (posSyncPendingCountRef.current === 0) {
-          setPosSyncIdleTick((n) => n + 1);
-        }
       });
 
     void posSyncChainRef.current;
@@ -757,34 +755,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     posCartRef.current = posCart;
   }, [posCart]);
 
-  useEffect(() => {
-    // Si el usuario deja el carrito vacío, liberamos la mesa cancelando la orden activa en backend.
-    if (!posOpen || !posTable) return;
-    if (!posOrderId) return;
-    if (posCart.length !== 0) return;
-    if (posActionBusy) return;
-    if (posSyncPendingCountRef.current > 0) return;
-
-    const cancelWhenEmpty = async () => {
-      try {
-        setPosActionBusy(true);
-        await backofficeApi.posCancelarOrden(posOrderId);
-        setPosOrderId(null);
-        setPosCommitted(false);
-        await loadTables();
-      } catch (e) {
-        // Silencioso: el carrito ya está vacío en UI, pero si backend no cancela mostramos un error.
-        const msg = e?.message || "No se pudo liberar la mesa al limpiar el carrito.";
-        snackbar.error(msg);
-      } finally {
-        setPosActionBusy(false);
-      }
-    };
-
-    cancelWhenEmpty();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posCart.length, posOrderId, posOpen, posTable, posActionBusy, posSyncIdleTick]);
-
   const closePosView = () => {
     posSyncChainRef.current = Promise.resolve();
     posSyncPendingCountRef.current = 0;
@@ -802,6 +772,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     setSaleOrdenId(null);
     setSaleModalLines([]);
     setSaleBackendTotal(null);
+    setPosCancelPinOpen(false);
     // Refresca el listado de mesas para que se vea el cambio de estado (rojo/ocupada).
     loadTables();
   };
@@ -1050,23 +1021,25 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     }
   };
 
-  const handleCancelarPos = async () => {
-    if (!posTable) return;
-    if (posActionBusy) return;
+  const openCancelPosPin = () => {
+    if (!posTable || posActionBusy) return;
+    if (!posOrderId) {
+      snackbar.info("No había una orden activa para cancelar.");
+      return;
+    }
+    setPosCancelPinOpen(true);
+  };
+
+  const executePosCancelarConPin = async (codigo) => {
+    if (!posTable || !posOrderId) throw new Error("No hay orden para cancelar.");
     setPosActionBusy(true);
     setError("");
     try {
-      if (posOrderId) {
-        await backofficeApi.posCancelarOrden(posOrderId);
-        snackbar.success("Pedido cancelado y mesa liberada.");
-      } else {
-        snackbar.info("No había una orden activa para cancelar.");
-      }
+      await backofficeApi.posCancelarOrden(posOrderId, codigo);
+      snackbar.success("Pedido cancelado y mesa liberada.");
+      setPosCancelPinOpen(false);
       closePosView();
       await loadTables();
-    } catch (e) {
-      const msg = e?.message || "No se pudo cancelar el pedido.";
-      snackbar.error(msg);
     } finally {
       setPosActionBusy(false);
     }
@@ -1556,7 +1529,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                       <div className="flex justify-between"><span>Total</span><span className="font-bold">{formatCurrency(posSubtotal, currencySymbol)}</span></div>
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-1.5 border-t border-slate-200 pt-2">
-                      <button type="button" onClick={handleCancelarPos} disabled={posActionBusy} className="inline-flex items-center justify-center gap-1 rounded-sm bg-red-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
+                      <button type="button" onClick={openCancelPosPin} disabled={posActionBusy} className="inline-flex items-center justify-center gap-1 rounded-sm bg-red-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
                         <XCircle className="h-3.5 w-3.5" />
                         Cancelar
                       </button>
@@ -1578,7 +1551,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
 
                 {(posCart.length === 0 && posOrderId) && (
                   <div className="mt-3 grid grid-cols-2 gap-1.5 border-t border-slate-200 pt-2">
-                    <button type="button" onClick={handleCancelarPos} disabled={posActionBusy} className="inline-flex items-center justify-center gap-1 rounded-sm bg-red-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
+                    <button type="button" onClick={openCancelPosPin} disabled={posActionBusy} className="inline-flex items-center justify-center gap-1 rounded-sm bg-red-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
                       <XCircle className="h-3.5 w-3.5" />
                       Cancelar
                     </button>
@@ -1713,7 +1686,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
 
               {(posCart.length > 0 || posOrderId) && (
                 <div className="mt-3 flex flex-wrap items-center justify-end gap-1.5 border-t border-slate-200 pt-2">
-                  <button type="button" onClick={handleCancelarPos} disabled={posActionBusy} className="inline-flex items-center gap-1 rounded-sm bg-red-500 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60">
+                  <button type="button" onClick={openCancelPosPin} disabled={posActionBusy} className="inline-flex items-center gap-1 rounded-sm bg-red-500 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60">
                     <XCircle className="h-3.5 w-3.5" />
                     Cancelar
                   </button>
@@ -1806,6 +1779,17 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
           busy={saleProcessing}
           onGuardar={handleGuardarVenta}
         />
+
+        {posCancelPinOpen && (
+          <CancelPedidoPinModal
+            open
+            onClose={() => !posActionBusy && setPosCancelPinOpen(false)}
+            loading={posActionBusy}
+            title="Cancelar pedido en mesa"
+            message="Ingresá el PIN de autorización para cancelar la orden y liberar la mesa."
+            onConfirm={executePosCancelarConPin}
+          />
+        )}
 
         {moveOrderOpen && posTable && (
           <BackofficeDialog

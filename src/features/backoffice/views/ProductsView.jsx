@@ -103,6 +103,8 @@ export function ProductsView({ currencySymbol = "C$" }) {
     stock: "",
     stockMinimo: "",
     controlarStock: true,
+    /** true = comida en cocina; no se devuelve stock al cancelar pedido */
+    esPreparado: true,
     activo: true,
     opcionesEspecialesOn: false,
     opcionesEspecialesLines: [""],
@@ -233,6 +235,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
       stock: "",
       stockMinimo: "",
       controlarStock: true,
+      esPreparado: true,
       activo: true,
       opcionesEspecialesOn: false,
       opcionesEspecialesLines: [""],
@@ -376,6 +379,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
         stock: p.stock ?? "",
         stockMinimo: p.stockMinimo ?? "",
         controlarStock: Boolean(p.controlarStock),
+        esPreparado: Boolean(p.esPreparado ?? p.EsPreparado ?? true),
         activo: p.activo !== false,
         opcionesEspecialesOn: tieneOpciones,
         opcionesEspecialesLines: lineas,
@@ -413,6 +417,7 @@ export function ProductsView({ currencySymbol = "C$" }) {
         ...(form.proveedorId ? { proveedorId: Number(form.proveedorId) } : {}),
         stockMinimo: Number(form.stockMinimo || 0),
         controlarStock: Boolean(form.controlarStock),
+        esPreparado: Boolean(form.esPreparado),
         activo: Boolean(form.activo),
         ...(form.id ? {} : { stock: Number(form.stock || 0) }),
       };
@@ -809,6 +814,20 @@ export function ProductsView({ currencySymbol = "C$" }) {
                     onChange={(e) => setForm((f) => ({ ...f, controlarStock: e.target.checked }))}
                   />
                   Controlar stock
+                </label>
+                <label className="flex min-h-[44px] items-start gap-3 text-sm text-slate-700 sm:min-h-0 sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-5 w-5 shrink-0 rounded border-slate-300 sm:h-4 sm:w-4"
+                    checked={form.esPreparado}
+                    onChange={(e) => setForm((f) => ({ ...f, esPreparado: e.target.checked }))}
+                  />
+                  <span>
+                    Es preparado (cocina)
+                    <span className="mt-0.5 block text-[11px] font-normal text-slate-500">
+                      Si está desmarcado (bebidas embotelladas, reventa), al cancelar un pedido se reintegra el stock cuando controlás inventario.
+                    </span>
+                  </span>
                 </label>
                 <label className="flex min-h-[44px] items-center gap-3 text-sm text-slate-700 sm:min-h-0">
                   <input

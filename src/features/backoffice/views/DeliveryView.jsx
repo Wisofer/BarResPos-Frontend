@@ -21,6 +21,7 @@ import {
   PosInlineOpcionesPanel,
   PosProductOpcionesModal,
   PosProcesarVentaModal,
+  CancelPedidoPinModal,
 } from "../components/index.js";
 import { PAGINATION } from "../constants/pagination.js";
 import { DEFAULT_TIPO_CAMBIO_USD, formatCurrency } from "../utils/currency.js";
@@ -107,6 +108,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
   const [saleProcessing, setSaleProcessing] = useState(false);
   const [detailOrder, setDetailOrder] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
+  const [cancelDeliveryPin, setCancelDeliveryPin] = useState({ open: false, row: null });
 
   useEffect(() => {
     deliveryPedidoIdRef.current = deliveryPedidoId;
@@ -393,19 +395,24 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
     }
   };
 
-  const cancelSavedDelivery = async (row) => {
+  const openCancelDeliveryPin = (row) => {
     if (row.estado === "Pagado") {
       snackbar.info("Un pedido pagado no se cancela desde aquí.");
       return;
     }
     if (row.estado === "Cancelado") return;
+    setCancelDeliveryPin({ open: true, row });
+  };
+
+  const executeDeliveryCancelConPin = async (codigo) => {
+    const row = cancelDeliveryPin.row;
+    if (!row?.pedidoId) throw new Error("Pedido no seleccionado.");
     setActionBusy(true);
     try {
-      await backofficeApi.deliveryPedidoCancelar(row.pedidoId);
+      await backofficeApi.deliveryPedidoCancelar(row.pedidoId, codigo);
       snackbar.success("Pedido cancelado.");
+      setCancelDeliveryPin({ open: false, row: null });
       await loadDeliveryList();
-    } catch (e) {
-      snackbar.error(e?.message || "No se pudo cancelar el pedido.");
     } finally {
       setActionBusy(false);
     }
@@ -889,7 +896,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                         </button>
                         <button
                           type="button"
-                          onClick={() => void cancelSavedDelivery(x)}
+                          onClick={() => openCancelDeliveryPin(x)}
                           disabled={actionBusy || x.estado === "Pagado" || x.estado === "Cancelado"}
                           title="Cancelar pedido"
                           className="inline-flex h-6 w-6 items-center justify-center rounded text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
@@ -1244,6 +1251,20 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
             </div>
           </div>
         </BackofficeDialog>
+      )}
+      {cancelDeliveryPin.open && (
+        <CancelPedidoPinModal
+          open
+          onClose={() => !actionBusy && setCancelDeliveryPin({ open: false, row: null })}
+          loading={actionBusy}
+          title="Cancelar pedido delivery"
+          message={
+            cancelDeliveryPin.row
+              ? `Pedido ${cancelDeliveryPin.row.codigo || cancelDeliveryPin.row.pedidoId}. Ingresá el PIN de autorización.`
+              : "Ingresá el PIN de autorización."
+          }
+          onConfirm={executeDeliveryCancelConPin}
+        />
       )}
     </section>
   );

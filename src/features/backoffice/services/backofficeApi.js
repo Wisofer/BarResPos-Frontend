@@ -35,6 +35,8 @@ export const backofficeApi = {
   pedidoTrasladarMesa: (pedidoId, mesaIdDestino) =>
     api.patchWithEnvelope(`/api/v1/pedidos/${pedidoId}/mesa`, { mesaId: mesaIdDestino }),
   updatePedido: (id, body) => api.put(`/api/v1/pedidos/${id}`, body),
+  /** Cancelación unificada (mesa, delivery, llevar). Requiere PIN en configuración. */
+  pedidoCancelar: (id, codigo) => api.post(`/api/v1/pedidos/${id}/cancelar`, { codigo }),
   listProductos: (params) => api.get(`/api/v1/productos${qs(params)}`),
   getProducto: (id) => api.get(`/api/v1/productos/${id}`),
   createProducto: (body) => api.post("/api/v1/productos", body),
@@ -80,7 +82,7 @@ export const backofficeApi = {
   ventasProcesarPago: (body) => api.post("/api/v1/ventas/procesar-pago", body),
   ventasGestionarPago: (body) => api.post("/api/v1/ventas/gestionar-pago", body),
   posOrdenes: (body) => api.post("/api/v1/pos/ordenes", body),
-  posCancelarOrden: (id) => api.post(`/api/v1/pos/ordenes/${id}/cancelar`, undefined),
+  posCancelarOrden: (id, codigo) => api.post(`/api/v1/pos/ordenes/${id}/cancelar`, { codigo }),
   cocinaOrdenEstado: (id, estado) =>
     api.patch(`/api/v1/cocina/ordenes/${id}/estado`, {
       estado,
@@ -102,6 +104,7 @@ export const backofficeApi = {
   reportesResumenVentasDetalle: (params) => api.get(`/api/v1/reportes/resumen-ventas/detalle${qs(params)}`),
   reportesProductosTop: (params) => api.get(`/api/v1/reportes/productos-top${qs(params)}`),
   reportesVentasPorMesero: (params) => api.get(`/api/v1/reportes/ventas-por-mesero${qs(params)}`),
+  reportesVentasPorCategoria: (params) => api.get(`/api/v1/reportes/ventas-por-categoria${qs(params)}`),
 
   /** Delivery: misma entidad orden/factura, origenPedido Delivery, sin mesa. */
   listDeliveryPedidos: (params) => api.get(`/api/v1/delivery/pedidos${qs(params)}`),
@@ -109,7 +112,8 @@ export const backofficeApi = {
   createDeliveryPedido: (body) => api.post("/api/v1/delivery/pedidos", body),
   updateDeliveryPedido: (id, body) => api.put(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}`, body),
   deliveryPedidoEnviarCocina: (id) => api.patch(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}/enviar-cocina`, {}),
-  deliveryPedidoCancelar: (id) => api.patch(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}/cancelar`, {}),
+  deliveryPedidoCancelar: (id, codigo) =>
+    api.post(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}/cancelar`, { codigo }),
   deliveryPedidoPrecuenta: (id) => api.get(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}/precuenta`),
   deliveryPedidoGestionarPago: (id, body) =>
     api.post(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}/gestionar-pago`, body),

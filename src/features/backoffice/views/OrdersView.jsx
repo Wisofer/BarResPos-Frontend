@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Check, Download, Eye, FilterX, Pencil, Printer, Search, X, XCircle } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
-import { BackofficeListSkeletonLoading } from "../components/index.js";
+import { BackofficeListSkeletonLoading, CancelPedidoPinModal } from "../components/index.js";
 import { PAGINATION } from "../constants/pagination.js";
 import { formatCurrency } from "../utils/currency.js";
 import { getApiUrl } from "../../../api/config.js";
@@ -9,9 +9,7 @@ import { getToken } from "../../../api/token.js";
 import { openBackendPrintHtml, openBackendPrintUrl } from "../utils/backofficePrint.js";
 import { useAuth } from "../../../contexts/AuthContext.jsx";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
-import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
 import { isAdminUser } from "../utils/auth.js";
-import { reportApiDateRange } from "../utils/reportDates.js";
 import {
   pagoDescuentoAtribuidoCordobas,
   pagoDescuentoMotivo,
@@ -56,6 +54,18 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+function labelTipoPedido(tipo, origenPedido) {
+  const t = String(tipo || "").toLowerCase();
+  if (t === "delivery") return "Delivery";
+  if (t === "llevar") return "Para llevar";
+  if (t === "mesa") return "Mesa";
+  const o = String(origenPedido || "");
+  if (o === "Delivery") return "Delivery";
+  if (o === "Llevar") return "Para llevar";
+  if (o === "Salon") return "Mesa";
+  return tipo || origenPedido || "—";
+}
+
 export function OrdersView({ currencySymbol = "C$" }) {
   const { user } = useAuth();
   const snackbar = useSnackbar();
@@ -72,6 +82,7 @@ export function OrdersView({ currencySymbol = "C$" }) {
     montoTotal: 0,
     montoTotalCobradoNeto: null,
     descuentoTotalCordobas: 0,
+    pedidosPorTipo: { mesa: 0, delivery: 0, llevar: 0 },
   });
   const [page, setPage] = useState(1);
   const [pageInfo, setPageInfo] = useState({ totalPages: 1, totalItems: 0 });
@@ -92,6 +103,8 @@ export function OrdersView({ currencySymbol = "C$" }) {
     estado: "",
     desde: "",
     hasta: "",
+    /** mesa | delivery | llevar | "" (todos) */
+    tipo: "",
   });
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -99,11 +112,11 @@ export function OrdersView({ currencySymbol = "C$" }) {
     setLoading(true);
     setError("");
     try {
-      const apiRange = reportApiDateRange(filters);
       const filterParams = {
         estado: filters.estado || undefined,
-        desde: apiRange.desde,
-        hasta: apiRange.hasta,
+        desde: filters.desde?.trim() || undefined,
+        hasta: filters.hasta?.trim() || undefined,
+        tipo: filters.tipo || undefined,
       };
 
       const [resumen, listado] = await Promise.all([
@@ -119,6 +132,8 @@ export function OrdersView({ currencySymbol = "C$" }) {
           rowId: p.id,
           id: p.codigo || p.numero || `#${1200 + i}`,
           numero: p.numero || null,
+          tipo: p.tipo || p.Tipo || null,
+          origenPedido: p.origenPedido || p.OrigenPedido || null,
           table: p.mesa || p.mesaNombre || p.origen || "Mesa",
           waiter: p.mesero || p.meseroNombre || "-",
           mesaId: p.mesaId || null,
@@ -145,6 +160,7 @@ export function OrdersView({ currencySymbol = "C$" }) {
         resumen?.montoTotal ??
         resumen?.MontoTotal ??
         0;
+      const ppt = resumen?.pedidosPorTipo ?? resumen?.PedidosPorTipo ?? {};
 
       setCards({
         totalPedidos: Number(resumen?.totalPedidos || 0),
@@ -153,6 +169,11 @@ export function OrdersView({ currencySymbol = "C$" }) {
         montoTotal: Number(consumoResumen || 0),
         montoTotalCobradoNeto: netoResumen != null && netoResumen !== "" ? Number(netoResumen) : null,
         descuentoTotalCordobas: Number(descResumen || 0),
+        pedidosPorTipo: {
+          mesa: Number(ppt.mesa ?? ppt.Mesa ?? 0),
+          delivery: Number(ppt.delivery ?? ppt.Delivery ?? 0),
+          llevar: Number(ppt.llevar ?? ppt.Llevar ?? 0),
+        },
       });
       setOrders(mapped);
       setPageInfo({
@@ -164,9 +185,18 @@ export function OrdersView({ currencySymbol = "C$" }) {
     } finally {
       setLoading(false);
     }
-  }, [currencySymbol, filters.desde, filters.estado, filters.hasta, page]);
+  }, [currencySymbol, filters.desde, filters.estado, filters.hasta, filters.tipo, page]);
 
   const quickStates = useMemo(() => ["", "Pendiente", "Pagado"], []);
+  const tipoFilters = useMemo(
+    () => [
+      { value: "", label: "Todos los orígenes" },
+      { value: "mesa", label: "Mesa" },
+      { value: "delivery", label: "Delivery" },
+      { value: "llevar", label: "Para llevar" },
+    ],
+    []
+  );
   const filteredOrders = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     if (!q) return orders;
@@ -185,20 +215,25 @@ export function OrdersView({ currencySymbol = "C$" }) {
     setFilters((prev) => ({ ...prev, estado }));
   };
 
+  const applyTipoFilter = (tipo) => {
+    setPage(1);
+    setFilters((prev) => ({ ...prev, tipo }));
+  };
+
   const clearFilters = () => {
     setPage(1);
-    setFilters({ estado: "", desde: "", hasta: "" });
+    setFilters({ estado: "", desde: "", hasta: "", tipo: "" });
   };
 
   const handleExport = async () => {
     setExporting(true);
     setError("");
     try {
-      const apiRange = reportApiDateRange(filters);
       const params = new URLSearchParams();
       if (filters.estado) params.set("estado", filters.estado);
-      if (apiRange.desde) params.set("desde", apiRange.desde);
-      if (apiRange.hasta) params.set("hasta", apiRange.hasta);
+      if (filters.desde) params.set("desde", filters.desde.trim());
+      if (filters.hasta) params.set("hasta", filters.hasta.trim());
+      if (filters.tipo) params.set("tipo", filters.tipo);
 
       const url = `${getApiUrl()}/api/v1/pedidos/exportar-excel${params.toString() ? `?${params.toString()}` : ""}`;
       const token = getToken();
@@ -275,24 +310,6 @@ export function OrdersView({ currencySymbol = "C$" }) {
       })),
     });
     setShowEdit(true);
-  };
-
-  const quickPatchEstado = async (orderId, estado) => {
-    setBusyAction(true);
-    setError("");
-    try {
-      await backofficeApi.patchPedidoEstado(orderId, estado);
-      snackbar.success("Estado de pedido actualizado.");
-      await fetchData();
-      if (showDetail && detailOrder?.id === orderId) {
-        const refreshed = await backofficeApi.getPedido(orderId);
-        setDetailOrder(refreshed);
-      }
-    } catch (err) {
-      snackbar.error(err.message || "No se pudo actualizar estado.");
-    } finally {
-      setBusyAction(false);
-    }
   };
 
   const cancelOrder = async (order) => {
@@ -535,6 +552,12 @@ export function OrdersView({ currencySymbol = "C$" }) {
                 <h3 className="mb-3 text-sm font-semibold text-slate-800">Informacion del Pedido</h3>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   <article className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-xs text-slate-500">Numero</p><p className="font-semibold text-slate-800">{detailOrder.numero || `#${detailOrder.id}`}</p></article>
+                  <article className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">Tipo / origen</p>
+                    <p className="font-semibold text-slate-800">
+                      {labelTipoPedido(detailOrder.tipo ?? detailOrder.Tipo, detailOrder.origenPedido ?? detailOrder.OrigenPedido)}
+                    </p>
+                  </article>
                   <article className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-xs text-slate-500">Fecha y Hora</p><p className="font-semibold text-slate-800">{createdAtLabel}</p></article>
                   <article className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-xs text-slate-500">Mesa</p><p className="font-semibold text-slate-800">{detailOrder.mesa || "-"}</p></article>
                   <article className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-xs text-slate-500">Mesero</p><p className="font-semibold text-slate-800">{detailOrder.mesero || "-"}</p></article>
@@ -930,6 +953,21 @@ export function OrdersView({ currencySymbol = "C$" }) {
           )}
         </div>
 
+        <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs text-slate-500">Pedidos salón (mesa)</p>
+            <p className="mt-1 text-lg font-bold text-slate-800">{cards.pedidosPorTipo?.mesa ?? 0}</p>
+          </article>
+          <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs text-slate-500">Pedidos delivery</p>
+            <p className="mt-1 text-lg font-bold text-slate-800">{cards.pedidosPorTipo?.delivery ?? 0}</p>
+          </article>
+          <article className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs text-slate-500">Para llevar</p>
+            <p className="mt-1 text-lg font-bold text-slate-800">{cards.pedidosPorTipo?.llevar ?? 0}</p>
+          </article>
+        </div>
+
         <div className="mt-4 flex flex-wrap gap-2">
           {quickStates.map((s) => (
             <button
@@ -941,6 +979,21 @@ export function OrdersView({ currencySymbol = "C$" }) {
               }`}
             >
               {s || "Todos"}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {tipoFilters.map((tf) => (
+            <button
+              key={tf.value || "all-tipo"}
+              type="button"
+              onClick={() => applyTipoFilter(tf.value)}
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                filters.tipo === tf.value ? "bg-amber-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {tf.label}
             </button>
           ))}
         </div>
@@ -976,6 +1029,7 @@ export function OrdersView({ currencySymbol = "C$" }) {
             <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3 font-semibold">Pedido</th>
+                <th className="px-4 py-3 font-semibold">Tipo</th>
                 <th className="px-4 py-3 font-semibold">Fecha</th>
                 <th className="px-4 py-3 font-semibold">Mesa</th>
                 <th className="px-4 py-3 font-semibold">Mesero</th>
@@ -989,7 +1043,7 @@ export function OrdersView({ currencySymbol = "C$" }) {
             <tbody className="divide-y divide-slate-200 bg-white">
               {filteredOrders.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-sm text-slate-500">
+                  <td colSpan={10} className="px-4 py-6 text-center text-sm text-slate-500">
                     No hay pedidos para los filtros seleccionados.
                   </td>
                 </tr>
@@ -1000,6 +1054,11 @@ export function OrdersView({ currencySymbol = "C$" }) {
                   <tr key={order.rowId} className="align-top">
                     <td className="px-4 py-3">
                       <p className="font-semibold text-slate-800">{order.id}</p>
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                        {labelTipoPedido(order.tipo, order.origenPedido)}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       <p>{dt.date}</p>
@@ -1023,15 +1082,15 @@ export function OrdersView({ currencySymbol = "C$" }) {
                       <span className={`rounded-md px-2 py-1 text-xs font-medium ${statusClass(order.status)}`}>{order.status}</span>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-0.5">
                         <button
                           type="button"
                           onClick={() => openDetail(order)}
                           disabled={busyAction}
                           title="Ver detalle"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:opacity-50"
                         >
-                          <Eye className="h-3.5 w-3.5" />
+                          <Eye className="h-4 w-4" />
                         </button>
                         {isAdmin && (
                           <button
@@ -1039,9 +1098,9 @@ export function OrdersView({ currencySymbol = "C$" }) {
                             onClick={() => openEditFromRow(order)}
                             disabled={busyAction || order.status === "Pagado" || order.status === "Cancelado"}
                             title="Editar pedido"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40"
                           >
-                            <Pencil className="h-3.5 w-3.5" />
+                            <Pencil className="h-4 w-4" />
                           </button>
                         )}
                         {isAdmin && (
@@ -1050,9 +1109,9 @@ export function OrdersView({ currencySymbol = "C$" }) {
                             onClick={() => cancelOrder(order)}
                             disabled={busyAction || order.status === "Cancelado" || order.status === "Pagado"}
                             title="Cancelar pedido"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-rose-500 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:opacity-40"
                           >
-                            <XCircle className="h-3.5 w-3.5" />
+                            <XCircle className="h-4 w-4" />
                           </button>
                         )}
                       </div>
@@ -1097,18 +1156,40 @@ export function OrdersView({ currencySymbol = "C$" }) {
           </button>
         </div>
       </div>
-      <ConfirmModal
-        open={confirmCancel.open}
-        onClose={() => setConfirmCancel({ open: false, order: null })}
-        onConfirm={async () => {
-          if (confirmCancel.order) await quickPatchEstado(confirmCancel.order.rowId, "Cancelado");
-        }}
-        title="Cancelar pedido"
-        message={confirmCancel.order ? `¿Deseas cancelar el pedido ${confirmCancel.order.id}?` : "¿Deseas cancelar este pedido?"}
-        confirmLabel="Cancelar pedido"
-        variant="danger"
-        loading={busyAction}
-      />
+      {confirmCancel.open && (
+        <CancelPedidoPinModal
+          open
+          onClose={() => setConfirmCancel({ open: false, order: null })}
+          loading={busyAction}
+          title="Cancelar pedido"
+          message={
+            confirmCancel.order
+              ? `Pedido ${confirmCancel.order.id}. Ingresá el PIN de autorización configurado en el sistema.`
+              : "Ingresá el PIN de autorización."
+          }
+          confirmLabel="Cancelar pedido"
+          onConfirm={async (codigo) => {
+            const order = confirmCancel.order;
+            if (!order) throw new Error("Pedido no seleccionado.");
+            setBusyAction(true);
+            try {
+              await backofficeApi.pedidoCancelar(order.rowId, codigo);
+              snackbar.success("Pedido cancelado.");
+              await fetchData();
+              if (showDetail && detailOrder?.id === order.rowId) {
+                try {
+                  const refreshed = await backofficeApi.getPedido(order.rowId);
+                  setDetailOrder(refreshed);
+                } catch {
+                  setShowDetail(false);
+                }
+              }
+            } finally {
+              setBusyAction(false);
+            }
+          }}
+        />
+      )}
 
     </div>
   );
