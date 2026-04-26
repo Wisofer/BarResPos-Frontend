@@ -19,6 +19,7 @@ import {
   BackofficeStatCardsListSkeleton,
   ListSkeleton,
   PosInlineOpcionesPanel,
+  PosProductCatalogTile,
   PosProductOpcionesModal,
   PosProcesarVentaModal,
   CancelPedidoPinModal,
@@ -48,6 +49,7 @@ import {
   openBackendPrintHtml,
   openBackendPrintUrl,
 } from "../utils/backofficePrint.js";
+import { buildPagoPayload } from "../utils/paymentPayload.js";
 import { fetchPosProductosYCategorias } from "../utils/posCatalogLoad.js";
 import { useAuth } from "../../../contexts/AuthContext.jsx";
 import {
@@ -529,11 +531,12 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   }, [posInlineOpcionesProduct, posInlineOpcionesPick]);
 
   const posProductGridClassMobile =
-    "grid auto-rows-min grid-cols-2 gap-2 overflow-auto content-start items-stretch";
+    "grid auto-rows-min grid-cols-2 gap-2 overflow-auto content-start items-stretch sm:grid-cols-3";
   const posProductGridClassDesktop =
-    "grid auto-rows-min grid-cols-2 gap-2 overflow-auto content-start items-stretch xl:grid-cols-3";
-  const posProductTileShell =
-    "flex min-h-[96px] w-full flex-col justify-end gap-0.5 rounded-md border border-slate-200 bg-gradient-to-b from-slate-200 to-slate-500 px-2 py-2 text-left text-[10px] font-semibold leading-tight text-white shadow-sm sm:min-h-[104px] disabled:cursor-not-allowed disabled:opacity-60";
+    "grid auto-rows-min grid-cols-2 gap-2 overflow-auto content-start items-stretch sm:grid-cols-3";
+  /** Sub-opciones de un producto (sin imagen). Mismo gradiente que `PosProductCatalogTile` sin imagen. */
+  const posOpcionTileShell =
+    "flex min-h-[96px] w-full flex-col justify-end gap-0.5 rounded-lg border border-slate-200/90 bg-gradient-to-b from-slate-200 to-slate-500 px-2.5 py-2.5 text-left text-[10px] font-bold leading-tight text-white shadow sm:min-h-[104px] [text-shadow:0_0_6px_rgba(255,255,255,0.35),0_1px_2px_rgba(0,0,0,0.08),0_0_1px_rgba(255,255,255,0.4)] disabled:cursor-not-allowed disabled:opacity-60";
 
   const rollbackPosLineByLineId = (lineId, cantidad) => {
     if (lineId == null || lineId === "") return;
@@ -721,21 +724,111 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     void syncPosDeltaAdd(product, 1, ops, notas, rollbackLineId);
   };
 
+  const syncPosCartSnapshot = (nextCart) => {
+    if (!posTable) return;
+    const snapshot = Array.isArray(nextCart) ? nextCart : [];
+
+    posSyncPendingCountRef.current += 1;
+    posSyncChainRef.current = posSyncChainRef.current
+      .then(async () => {
+        let currentId = posOrderIdRef.current;
+
+        // Si no existe orden todavía y no hay items, no hay nada que persistir.
+        if (!currentId && snapshot.length === 0) {
+          setPosCommitted(true);
+          return;
+        }
+
+        // Crea orden activa solo si hay items locales que persistir.
+        if (!currentId && snapshot.length > 0) {
+          const productos = posCartToPosOrdenProductos(snapshot);
+          const data = await backofficeApi.posOrdenes({
+            mesaId: Number(posTable.id),
+            ordenId: undefined,
+            observaciones: "",
+            productos,
+          });
+          const newOrderId = extractPosOrdenResponseId(data, null);
+          if (!newOrderId) throw new Error("No se pudo crear la orden activa en backend.");
+          currentId = newOrderId;
+          setPosOrderId(newOrderId);
+        }
+
+        if (!currentId) {
+          setPosCommitted(true);
+          return;
+        }
+
+        const pedido = await backofficeApi.getPedido(currentId);
+        const items = posCartToPedidoItemsPayload(snapshot);
+
+        const updateResp = await backofficeApi.updatePedido(currentId, {
+          mesaId: pedido?.mesaId ?? pedido?.MesaId ?? Number(posTable.id),
+          clienteId: pedido?.clienteId ?? pedido?.ClienteId ?? null,
+          meseroId: pedido?.meseroId ?? pedido?.MeseroId ?? null,
+          estado: pedido?.estado ?? pedido?.Estado ?? "Listo",
+          estadoCocina: pedido?.estadoCocina ?? pedido?.EstadoCocina ?? "Listo",
+          observaciones: pedido?.observaciones ?? pedido?.Observaciones ?? null,
+          items,
+        });
+
+        const vacio = Boolean(updateResp?.vacio ?? updateResp?.Vacio);
+        if (vacio) {
+          setPosOrderId(null);
+          setPosCart([]);
+          await loadTables();
+          await refreshPosTableFromBackend(posTable.id);
+          setPosCommitted(true);
+          return;
+        }
+
+        setPosCommitted(true);
+      })
+      .catch(async (e) => {
+        const msg = e?.message || "No se pudo actualizar la orden.";
+        snackbar.error(msg);
+        if (!posTable) return;
+        try {
+          const freshRaw = await backofficeApi.getMesaOrdenActiva(posTable.id);
+          const fresh = unwrapEnvelope(freshRaw);
+          const backendItems = getOrdenItems(fresh);
+          setPosCart(backendItems ? mapBackendItemsToCart(backendItems) : []);
+          setPosCommitted(true);
+        } catch {
+          /* ignore */
+        }
+      })
+      .finally(() => {
+        posSyncPendingCountRef.current = Math.max(0, posSyncPendingCountRef.current - 1);
+      });
+
+    void posSyncChainRef.current;
+  };
+
   const updateCartQty = (lineId, delta) => {
+    let nextCart = [];
     setPosCart((prev) => {
       const next = prev
         .map((item) =>
           item.lineId === lineId ? { ...item, qty: Math.max(0, Number(item.qty || 0) + delta) } : item
         )
         .filter((item) => item.qty > 0);
+      nextCart = next;
       return next;
     });
     setPosCommitted(false);
+    syncPosCartSnapshot(nextCart);
   };
 
   const removeFromCart = (lineId) => {
-    setPosCart((prev) => prev.filter((item) => item.lineId !== lineId));
+    let nextCart = [];
+    setPosCart((prev) => {
+      const next = prev.filter((item) => item.lineId !== lineId);
+      nextCart = next;
+      return next;
+    });
     setPosCommitted(false);
+    syncPosCartSnapshot(nextCart);
   };
 
   const updateCartNotas = (lineId, notas) => {
@@ -946,7 +1039,6 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
 
   const ensurePosOrderSynced = async () => {
     if (!posTable) return posOrderId;
-    if (posCart.length === 0) return posOrderId;
     if (posActionBusy) return posOrderId;
 
     await posSyncChainRef.current.catch(() => {});
@@ -955,7 +1047,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     setError("");
     try {
       // Aseguramos que exista la orden activa (si por algún motivo no existe aún).
-      if (!posOrderId) {
+      if (!posOrderId && posCart.length > 0) {
         const productos = posCartToPosOrdenProductos(posCart);
         const data = await backofficeApi.posOrdenes({
           mesaId: Number(posTable.id),
@@ -969,13 +1061,16 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       }
 
       const currentId = posOrderId ?? posOrderIdRef.current;
-      if (!currentId) throw new Error("OrdenId inválido para sincronizar.");
+      if (!currentId) {
+        setPosCommitted(true);
+        return null;
+      }
 
       // PUT reemplaza items: así queda 1:1 con el carrito (incluye +/-).
       const pedido = await backofficeApi.getPedido(currentId);
       const items = posCartToPedidoItemsPayload(posCart);
 
-      await backofficeApi.updatePedido(currentId, {
+      const updateResp = await backofficeApi.updatePedido(currentId, {
         mesaId: pedido?.mesaId ?? pedido?.MesaId ?? Number(posTable.id),
         clienteId: pedido?.clienteId ?? pedido?.ClienteId ?? null,
         meseroId: pedido?.meseroId ?? pedido?.MeseroId ?? null,
@@ -985,17 +1080,30 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
         items,
       });
 
+      const vacio = Boolean(updateResp?.vacio ?? updateResp?.Vacio);
+      if (vacio) {
+        setPosOrderId(null);
+        setPosCart([]);
+        setPosCommitted(true);
+        await loadTables();
+        await refreshPosTableFromBackend(posTable.id);
+        return null;
+      }
+
       const freshRaw = await backofficeApi.getMesaOrdenActiva(posTable.id).catch(() => null);
       const fresh = unwrapEnvelope(freshRaw);
       const backendItems = getOrdenItems(fresh);
       if (backendItems) setPosCart(mapBackendItemsToCart(backendItems));
+      else setPosCart([]);
 
       setPosCommitted(true);
       await loadTables();
-      try {
-        await backofficeApi.patchMesaEstado(Number(posTable.id), "Ocupada");
-      } catch {
-        /* puede ya estar ocupada */
+      if (posCart.length > 0) {
+        try {
+          await backofficeApi.patchMesaEstado(Number(posTable.id), "Ocupada");
+        } catch {
+          /* puede ya estar ocupada */
+        }
       }
       await refreshPosTableFromBackend(posTable.id);
       return currentId;
@@ -1125,38 +1233,11 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     setSaleProcessing(true);
     setError("");
     try {
-      const obsParts = [
-        form.comentario,
-        form.descuento > 0 ? `Descuento: ${form.descuento}` : null,
-        form.moneda === "USD" ? `TC: ${form.tipoCambioAplicado}` : null,
-        form.tipoPago === "Efectivo"
-          ? `Recibido: ${form.montoRecibido} ${form.moneda}, Vuelto: ${form.vueltoMoneda} ${form.moneda} (${form.vueltoCordobas} C$)`
-          : null,
-      ].filter(Boolean);
-
-      // Backend actualizado: interpreta monto según Moneda.
-      // Enviamos SIEMPRE base contable C$ para evitar ambigüedad.
-      const montoPagado =
-        form.tipoPago === "Efectivo" ? Number(form.montoRecibidoCordobas || 0) : Number(form.totalAPagarCordobas || 0);
-
-      const descuentoMonto = Number(form.descuento) > 0 ? Number(form.descuento) : undefined;
-      const descuentoMotivo =
-        descuentoMonto != null && String(form.comentario || "").trim() ? String(form.comentario).trim() : undefined;
-
-      const payload = {
-        ordenId: Number(saleOrdenId),
-        tipoPago: form.tipoPago,
-        montoPagado,
-        moneda: "C",
-        banco: null,
-        tipoCuenta: null,
-        observaciones: obsParts.join(" | ") || "Pago POS",
-        montoCordobasFisico: null,
-        montoDolaresFisico: null,
-        montoCordobasElectronico: null,
-        montoDolaresElectronico: null,
-        ...(descuentoMonto != null ? { descuentoMonto, ...(descuentoMotivo ? { descuentoMotivo } : {}) } : {}),
-      };
+      const payload = buildPagoPayload({
+        ordenId: saleOrdenId,
+        form,
+        defaultObservaciones: "Pago POS",
+      });
 
       let resp;
       try {
@@ -1424,7 +1505,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                     currencySymbol={currencySymbol}
                     disabled={posActionBusy || !cajaAbierta}
                     gridClassName={`max-h-[55vh] ${posProductGridClassMobile}`}
-                    tileClassName={posProductTileShell}
+                    tileClassName={posOpcionTileShell}
                   />
                 ) : (
                   <>
@@ -1439,17 +1520,12 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                     ) : (
                       <div className={`max-h-[55vh] ${posProductGridClassMobile}`}>
                         {filteredPosProducts.map((p) => (
-                          <button
+                          <PosProductCatalogTile
                             key={p.id}
-                            type="button"
+                            product={p}
                             onClick={() => addProductToCart(p)}
                             disabled={posActionBusy || !cajaAbierta}
-                            className={posProductTileShell}
-                          >
-                            <span className="line-clamp-4 break-words drop-shadow-sm">
-                              {String(p.nombre || "Producto").toUpperCase()}
-                            </span>
-                          </button>
+                          />
                         ))}
                         {filteredPosProducts.length === 0 && (
                           <p className="col-span-2 py-8 text-center text-xs text-slate-500">Sin productos para mostrar.</p>
@@ -1717,7 +1793,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                   currencySymbol={currencySymbol}
                   disabled={posActionBusy || !cajaAbierta}
                   gridClassName={`max-h-[420px] ${posProductGridClassDesktop} lg:h-[calc(100%-5.5rem)] lg:max-h-full`}
-                  tileClassName={posProductTileShell}
+                  tileClassName={posOpcionTileShell}
                 />
               ) : (
                 <>
@@ -1732,17 +1808,12 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                   ) : (
                     <div className={`max-h-[420px] ${posProductGridClassDesktop} lg:h-[calc(100%-2.5rem)] lg:max-h-full`}>
                       {filteredPosProducts.map((p) => (
-                        <button
+                        <PosProductCatalogTile
                           key={p.id}
-                          type="button"
+                          product={p}
                           onClick={() => addProductToCart(p)}
                           disabled={posActionBusy || !cajaAbierta}
-                          className={posProductTileShell}
-                        >
-                          <span className="line-clamp-4 break-words drop-shadow-sm">
-                            {String(p.nombre || "Producto").toUpperCase()}
-                          </span>
-                        </button>
+                        />
                       ))}
                       {filteredPosProducts.length === 0 && (
                         <p className="col-span-2 py-8 text-center text-xs text-slate-500">Sin productos para mostrar.</p>

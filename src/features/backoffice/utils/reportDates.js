@@ -20,12 +20,33 @@ export function addOneCalendarDay(dateStr) {
 }
 
 /**
- * Construye { desde, hasta } para reportes: "hasta" del usuario es inclusivo;
- * el valor enviado al API es el día siguiente (fin exclusivo), si el backend usa ese patrón.
+ * Rango { desde, hasta } para BarRestPOS: el backend toma `hasta` como **último día inclusivo**
+ * (p. ej. ReporteService/Dashboard: finRango = hasta.Date + 1 d − 1 tick; caja: FechaCierre <= hasta.Date).
+ * No se suma un día extra en el front.
  */
 export function reportApiDateRange(range) {
   const desde = range?.desde?.trim() || undefined;
   const userHasta = range?.hasta?.trim();
-  const hasta = userHasta ? addOneCalendarDay(userHasta) : undefined;
-  return { desde, hasta };
+  return { desde, hasta: userHasta || undefined };
+}
+
+export function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function buildDateRange(range) {
+  return reportApiDateRange(range);
+}
+
+export function formatDateTime(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString("es-NI", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

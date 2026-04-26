@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ChefHat,
   Eye,
+  MessageCircle,
   Minus,
   Pencil,
   Plus,
@@ -19,6 +20,7 @@ import {
   BackofficeDialog,
   ListSkeleton,
   PosInlineOpcionesPanel,
+  PosProductCatalogTile,
   PosProductOpcionesModal,
   PosProcesarVentaModal,
   CancelPedidoPinModal,
@@ -29,6 +31,7 @@ import {
   openBackendPrintHtml,
   openBackendPrintUrl,
 } from "../utils/backofficePrint.js";
+import { buildPagoPayload } from "../utils/paymentPayload.js";
 import { getPedidoMontoNumeric, mapBackendItemsToCart, posCartToModalLines } from "../utils/posPedido.js";
 import { buildDeliveryPedidoBody, mapDeliveryListRow } from "../utils/deliveryPedido.js";
 import { fetchPosProductosYCategorias } from "../utils/posCatalogLoad.js";
@@ -109,6 +112,34 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
   const [detailOrder, setDetailOrder] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
   const [cancelDeliveryPin, setCancelDeliveryPin] = useState({ open: false, row: null });
+  const [cajaAbierta, setCajaAbierta] = useState(true);
+  const cajaAbiertaRef = useRef(true);
+  cajaAbiertaRef.current = cajaAbierta;
+
+  const syncCajaEstado = useCallback(async () => {
+    try {
+      const caja = await backofficeApi.cajaEstado();
+      const abierta = Boolean(
+        caja?.abierta ?? caja?.Abierta ?? (String(caja?.estado ?? caja?.Estado ?? "").toLowerCase() === "abierto")
+      );
+      setCajaAbierta(abierta);
+      return abierta;
+    } catch {
+      return cajaAbiertaRef.current;
+    }
+  }, []);
+
+  useEffect(() => {
+    void syncCajaEstado();
+  }, [syncCajaEstado]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      void syncCajaEstado();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [syncCajaEstado]);
 
   useEffect(() => {
     deliveryPedidoIdRef.current = deliveryPedidoId;
@@ -166,9 +197,10 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
   const isPedidoBloqueado = pedidoEstado === "Pagado" || pedidoEstado === "Cancelado";
 
   const deliveryProductGridClass =
-    "grid auto-rows-min grid-cols-2 gap-2 overflow-auto content-start items-stretch xl:grid-cols-3";
-  const deliveryProductTileShell =
-    "flex min-h-[96px] w-full flex-col justify-end gap-0.5 rounded-md border border-slate-200 bg-gradient-to-b from-slate-200 to-slate-500 px-2 py-2 text-left text-[10px] font-semibold leading-tight text-white shadow-sm sm:min-h-[104px]";
+    "grid auto-rows-min grid-cols-2 gap-2 overflow-auto content-start items-stretch sm:grid-cols-3";
+  /** Solo selector de opciones (sin imagen de producto). */
+  const deliveryOpcionTileShell =
+    "flex min-h-[96px] w-full flex-col justify-end gap-0.5 rounded-lg border border-slate-200/90 bg-gradient-to-b from-slate-200 to-slate-500 px-2.5 py-2.5 text-left text-[10px] font-bold leading-tight text-white shadow sm:min-h-[104px] [text-shadow:0_0_6px_rgba(255,255,255,0.35),0_1px_2px_rgba(0,0,0,0.08),0_0_1px_rgba(255,255,255,0.4)]";
 
   const deliveryInlineOpcionesPick = useMemo(
     () => (deliveryInlineOpcionesProduct ? getSingleGrupoOpcionesForPosInline(deliveryInlineOpcionesProduct) : null),
@@ -197,6 +229,11 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
   };
 
   const openNewDelivery = async () => {
+    const ok = await syncCajaEstado();
+    if (!ok) {
+      snackbar.error("Caja cerrada. Abrí caja desde el menú Caja para tomar pedidos delivery.");
+      return;
+    }
     setOpenBuilder(true);
     setDeliveryPedidoId(null);
     deliveryPedidoIdRef.current = null;
@@ -244,6 +281,10 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
       snackbar.info("Agrega productos para el pedido delivery.");
       return null;
     }
+    if (!cajaAbierta) {
+      snackbar.error("Caja cerrada. No se puede guardar el pedido.");
+      return null;
+    }
     const body = buildDeliveryPedidoBody(customer, cart);
     setActionBusy(true);
     try {
@@ -277,6 +318,10 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
 
   const addCartLine = (product, opcionesSeleccionadas = []) => {
     if (isPedidoBloqueado) return;
+    if (!cajaAbierta) {
+      snackbar.error("Caja cerrada. No se pueden agregar productos.");
+      return;
+    }
     const id = Number(product?.id ?? product?.Id);
     const grupos = normalizeOpcionesGrupos(product);
     const opsNorm = normalizeOpcionesSeleccionadas(opcionesSeleccionadas);
@@ -313,6 +358,10 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
 
   const addToCart = (product) => {
     if (isPedidoBloqueado) return;
+    if (!cajaAbierta) {
+      snackbar.error("Caja cerrada. No se pueden agregar productos.");
+      return;
+    }
     if (productoTieneOpcionesVisibles(product)) {
       if (getSingleGrupoOpcionesForPosInline(product)) {
         setDeliveryInlineOpcionesProduct(product);
@@ -333,6 +382,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
 
   const updateQty = (lineId, delta) => {
     if (isPedidoBloqueado) return;
+    if (!cajaAbierta) return;
     setCart((prev) =>
       prev
         .map((x) => (x.lineId === lineId ? { ...x, qty: Math.max(0, Number(x.qty || 0) + delta) } : x))
@@ -343,6 +393,11 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
   const editSavedDelivery = async (row) => {
     if (row.estado === "Pagado" || row.estado === "Cancelado") {
       snackbar.info("Este pedido no se puede editar.");
+      return;
+    }
+    const ok = await syncCajaEstado();
+    if (!ok) {
+      snackbar.error("Caja cerrada. Abrí caja para editar pedidos delivery.");
       return;
     }
     setActionBusy(true);
@@ -381,6 +436,11 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
       snackbar.info("Este pedido no se puede editar.");
       return;
     }
+    const ok = await syncCajaEstado();
+    if (!ok) {
+      snackbar.error("Caja cerrada. Abrí caja para editar pedidos delivery.");
+      return;
+    }
     setActionBusy(true);
     try {
       applyPedidoDetail(detailOrder);
@@ -402,6 +462,33 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
     }
     if (row.estado === "Cancelado") return;
     setCancelDeliveryPin({ open: true, row });
+  };
+
+  const sendDeliveryWhatsapp = async (row) => {
+    if (!row?.pedidoId) return;
+    const phone = String(row?.customer?.telefono || "").trim();
+    if (!phone) {
+      snackbar.info("El pedido no tiene teléfono de cliente.");
+      return;
+    }
+    setActionBusy(true);
+    try {
+      const data = await backofficeApi.deliveryPedidoWhatsappLink(row.pedidoId);
+      const waLink = data?.waLink ?? data?.WaLink ?? "";
+      if (!waLink || typeof waLink !== "string") {
+        throw new Error("No se pudo generar el enlace de WhatsApp.");
+      }
+      const win = window.open(waLink, "_blank", "noopener,noreferrer");
+      if (!win) {
+        snackbar.error("Permite ventanas emergentes para abrir WhatsApp.");
+        return;
+      }
+      snackbar.success("Abriendo WhatsApp.");
+    } catch (e) {
+      snackbar.error(e?.message || "No se pudo generar enlace de WhatsApp.");
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const executeDeliveryCancelConPin = async (codigo) => {
@@ -534,36 +621,11 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
     if (!pid) return;
     setSaleProcessing(true);
     try {
-      const obsParts = [
-        form.comentario,
-        form.descuento > 0 ? `Descuento: ${form.descuento}` : null,
-        form.moneda === "USD" ? `TC: ${form.tipoCambioAplicado}` : null,
-        form.tipoPago === "Efectivo"
-          ? `Recibido: ${form.montoRecibido} ${form.moneda}, Vuelto: ${form.vueltoMoneda} ${form.moneda} (${form.vueltoCordobas} C$)`
-          : null,
-      ].filter(Boolean);
-
-      const montoPagado =
-        form.tipoPago === "Efectivo" ? Number(form.montoRecibidoCordobas || 0) : Number(form.totalAPagarCordobas || 0);
-
-      const descuentoMonto = Number(form.descuento) > 0 ? Number(form.descuento) : undefined;
-      const descuentoMotivo =
-        descuentoMonto != null && String(form.comentario || "").trim() ? String(form.comentario).trim() : undefined;
-
-      const payload = {
-        ordenId: Number(pid),
-        tipoPago: form.tipoPago,
-        montoPagado,
-        moneda: "C",
-        banco: null,
-        tipoCuenta: null,
-        observaciones: obsParts.join(" | ") || "Pago delivery",
-        montoCordobasFisico: null,
-        montoDolaresFisico: null,
-        montoCordobasElectronico: null,
-        montoDolaresElectronico: null,
-        ...(descuentoMonto != null ? { descuentoMonto, ...(descuentoMotivo ? { descuentoMotivo } : {}) } : {}),
-      };
+      const payload = buildPagoPayload({
+        ordenId: pid,
+        form,
+        defaultObservaciones: "Pago delivery",
+      });
 
       let resp;
       try {
@@ -808,7 +870,16 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
       <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-slate-800">Delivery</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-semibold text-slate-800">Delivery</h2>
+              <span
+                className={`rounded-lg px-2 py-0.5 text-[11px] font-semibold ${
+                  cajaAbierta ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-800"
+                }`}
+              >
+                Caja: {cajaAbierta ? "Abierta" : "Cerrada"}
+              </span>
+            </div>
             <p className="text-xs text-slate-500">Pedidos a domicilio sin mesa.</p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
@@ -824,8 +895,9 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
             <button
               type="button"
               onClick={() => void openNewDelivery()}
-              disabled={actionBusy}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+              disabled={actionBusy || !cajaAbierta}
+              title={!cajaAbierta ? "Abrí caja en el menú Caja para tomar pedidos" : undefined}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <ShoppingBag className="h-4 w-4" />
               Pedido delivery
@@ -833,55 +905,62 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-slate-200">
-          <table className="w-full text-xs">
-            <thead className="bg-slate-100 text-left text-slate-600">
+        <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <table className="min-w-[920px] w-full text-sm">
+            <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-3 py-2">Código</th>
-                <th className="px-3 py-2">Cliente</th>
-                <th className="px-3 py-2">Teléfono</th>
-                <th className="px-3 py-2">Estado</th>
-                <th className="px-3 py-2">Total</th>
-                <th className="px-3 py-2">Hora</th>
-                <th className="px-3 py-2">Acciones</th>
+                <th className="px-4 py-3 font-semibold">Código</th>
+                <th className="px-4 py-3 font-semibold">Cliente</th>
+                <th className="px-4 py-3 font-semibold">Teléfono</th>
+                <th className="px-4 py-3 font-semibold">Estado</th>
+                <th className="px-4 py-3 font-semibold">Total</th>
+                <th className="px-4 py-3 font-semibold">Hora</th>
+                <th className="px-4 py-3 font-semibold">Acciones</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-200 bg-white">
               {listLoading ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-4">
+                  <td colSpan={7} className="px-4 py-4">
                     <ListSkeleton rows={5} />
                   </td>
                 </tr>
               ) : listRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">
                     {listSearch.trim() ? "Sin resultados para la búsqueda." : "Sin pedidos delivery todavía."}
                   </td>
                 </tr>
               ) : (
                 listRows.map((x) => (
-                  <tr key={x.pedidoId} className="border-t border-slate-100">
-                    <td className="px-3 py-2 font-semibold text-slate-700">{x.codigo}</td>
-                    <td className="px-3 py-2">{x.customer?.nombre || "—"}</td>
-                    <td className="px-3 py-2">{x.customer?.telefono || "—"}</td>
-                    <td className="px-3 py-2 text-slate-600">{x.estado || "—"}</td>
-                    <td className="px-3 py-2">{formatCurrency(x.total, currencySymbol)}</td>
-                    <td className="px-3 py-2 text-slate-500">
+                  <tr key={x.pedidoId} className="align-top">
+                    <td className="px-4 py-3">
+                      <p className="font-semibold text-slate-800">{x.codigo}</p>
+                      <p className="text-xs text-slate-500">ID {x.pedidoId}</p>
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">{x.customer?.nombre || "—"}</td>
+                    <td className="px-4 py-3 text-slate-700">{x.customer?.telefono || "—"}</td>
+                    <td className="px-4 py-3">
+                      <span className={`rounded-md px-2 py-1 text-xs font-medium ${statusClass(x.estado)}`}>
+                        {x.estado || "—"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-semibold tabular-nums text-slate-800">{formatCurrency(x.total, currencySymbol)}</td>
+                    <td className="px-4 py-3 text-slate-500">
                       {new Date(x.createdAt).toLocaleTimeString("es-NI", {
                         hour: "2-digit",
                         minute: "2-digit",
                         hour12: false,
                       })}
                     </td>
-                    <td className="px-3 py-2">
-                      <div className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white p-0.5">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => void viewSavedDelivery(x)}
                           disabled={actionBusy}
                           title="Ver detalle"
-                          className="inline-flex h-6 w-6 items-center justify-center rounded text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                         >
                           <Eye className="h-3.5 w-3.5" />
                         </button>
@@ -890,7 +969,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                           onClick={() => void editSavedDelivery(x)}
                           disabled={actionBusy || x.estado === "Pagado" || x.estado === "Cancelado"}
                           title="Editar pedido"
-                          className="inline-flex h-6 w-6 items-center justify-center rounded text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
@@ -899,9 +978,18 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                           onClick={() => openCancelDeliveryPin(x)}
                           disabled={actionBusy || x.estado === "Pagado" || x.estado === "Cancelado"}
                           title="Cancelar pedido"
-                          className="inline-flex h-6 w-6 items-center justify-center rounded text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-40"
                         >
                           <X className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void sendDeliveryWhatsapp(x)}
+                          disabled={actionBusy || !String(x.customer?.telefono || "").trim()}
+                          title="Enviar por WhatsApp"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-emerald-200 text-emerald-600 hover:bg-emerald-50 disabled:opacity-40"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </td>
@@ -917,9 +1005,27 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
 
   return (
     <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-100 p-3 shadow-sm lg:h-[calc(100vh-10.5rem)]">
+      {!cajaAbierta && (
+        <div
+          className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900"
+          role="status"
+        >
+          <strong className="font-semibold">Caja cerrada.</strong> No podés agregar productos ni guardar. Abrí caja (menú
+          Caja) o volvé al listado.
+        </div>
+      )}
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold text-slate-800">DELIVERY | {deliveryCodigo || "Pedido"}</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold text-slate-800">DELIVERY | {deliveryCodigo || "Pedido"}</h2>
+            <span
+              className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase ${
+                cajaAbierta ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+              }`}
+            >
+              Caja {cajaAbierta ? "abierta" : "cerrada"}
+            </span>
+          </div>
           <p className="mt-0.5 text-xs text-slate-500">Seleccioná productos para este pedido.</p>
           {pedidoEstado ? (
             <p className="mt-0.5 text-[11px] font-medium text-slate-600">Estado: {pedidoEstado}</p>
@@ -1008,7 +1114,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                               prev.map((x) => (x.lineId === item.lineId ? { ...x, notas: e.target.value } : x))
                             )
                           }
-                          disabled={loading || isPedidoBloqueado}
+                          disabled={loading || isPedidoBloqueado || !cajaAbierta}
                           placeholder="ej. sin cebolla"
                           className="box-border w-full min-w-0 rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] text-slate-800 placeholder:text-slate-400"
                         />
@@ -1018,7 +1124,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                           <button
                             type="button"
                             onClick={() => updateQty(item.lineId, -1)}
-                            disabled={isPedidoBloqueado || actionBusy}
+                            disabled={isPedidoBloqueado || actionBusy || !cajaAbierta}
                             className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-700 hover:bg-slate-100 disabled:opacity-40"
                           >
                             <Minus className="h-3 w-3" />
@@ -1027,7 +1133,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                           <button
                             type="button"
                             onClick={() => updateQty(item.lineId, 1)}
-                            disabled={isPedidoBloqueado || actionBusy}
+                            disabled={isPedidoBloqueado || actionBusy || !cajaAbierta}
                             className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-700 hover:bg-slate-100 disabled:opacity-40"
                           >
                             <Plus className="h-3 w-3" />
@@ -1041,7 +1147,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                           <button
                             type="button"
                             onClick={() => setCart((prev) => prev.filter((x) => x.lineId !== item.lineId))}
-                            disabled={isPedidoBloqueado || actionBusy}
+                            disabled={isPedidoBloqueado || actionBusy || !cajaAbierta}
                             className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-red-200 text-red-600 disabled:opacity-40"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -1079,7 +1185,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                 <button
                   type="button"
                   onClick={() => void handleImprimirCuenta()}
-                  disabled={actionBusy || isPedidoBloqueado}
+                  disabled={actionBusy || isPedidoBloqueado || !cajaAbierta}
                   className="inline-flex items-center gap-1 rounded-sm bg-sky-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-sky-600 disabled:opacity-60"
                 >
                   <Printer className="h-3.5 w-3.5" />
@@ -1088,7 +1194,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                 <button
                   type="button"
                   onClick={() => void handleEnviarCocina()}
-                  disabled={actionBusy || isPedidoBloqueado}
+                  disabled={actionBusy || isPedidoBloqueado || !cajaAbierta}
                   className="inline-flex items-center gap-1 rounded-sm bg-amber-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-amber-600 disabled:opacity-60"
                 >
                   <ChefHat className="h-3.5 w-3.5" />
@@ -1097,7 +1203,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                 <button
                   type="button"
                   onClick={() => void handleProcesarOrden()}
-                  disabled={actionBusy || isPedidoBloqueado}
+                  disabled={actionBusy || isPedidoBloqueado || !cajaAbierta}
                   className="inline-flex items-center gap-1 rounded-sm bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
                 >
                   <Save className="h-3.5 w-3.5" />
@@ -1106,7 +1212,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                 <button
                   type="button"
                   onClick={handleGuardar}
-                  disabled={actionBusy || isPedidoBloqueado}
+                  disabled={actionBusy || isPedidoBloqueado || !cajaAbierta}
                   className="inline-flex items-center gap-1 rounded-sm bg-violet-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
                 >
                   <Save className="h-3.5 w-3.5" />
@@ -1125,7 +1231,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar producto"
-              disabled={isPedidoBloqueado}
+              disabled={isPedidoBloqueado || !cajaAbierta}
               className="w-full bg-transparent text-xs text-slate-700 outline-none"
             />
           </label>
@@ -1144,26 +1250,20 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                 onPickOpcion={pickDeliveryInlineOpcion}
                 onBack={() => setDeliveryInlineOpcionesProduct(null)}
                 currencySymbol={currencySymbol}
-                disabled={isPedidoBloqueado}
+                disabled={isPedidoBloqueado || !cajaAbierta}
                 gridClassName={`min-h-[220px] flex-1 ${deliveryProductGridClass}`}
-                tileClassName={deliveryProductTileShell}
+                tileClassName={deliveryOpcionTileShell}
               />
             ) : loading ? (
               <ListSkeleton rows={8} />
             ) : (
               filteredProducts.map((p) => (
-                <button
+                <PosProductCatalogTile
                   key={p.id}
-                  type="button"
+                  product={p}
                   onClick={() => addToCart(p)}
-                  disabled={isPedidoBloqueado}
-                  className={deliveryProductTileShell}
-                >
-                  <span>{String(p.nombre || "Producto").toUpperCase()}</span>
-                  <span className="text-[10px] text-slate-100">
-                    {formatCurrency(Number(p.precio ?? p.Precio ?? 0), currencySymbol)}
-                  </span>
-                </button>
+                  disabled={isPedidoBloqueado || !cajaAbierta}
+                />
               ))
             )}
           </div>

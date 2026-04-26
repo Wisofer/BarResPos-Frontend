@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useSnackbar } from "../contexts/SnackbarContext.jsx";
 import { BackofficeShellHeaderActions, MobileNav, SidebarNav } from "../features/backoffice/components";
 import { NAV_ITEMS } from "../features/backoffice/constants.js";
 import { backofficeApi } from "../features/backoffice/services/backofficeApi.js";
 import { PAGINATION } from "../features/backoffice/constants/pagination.js";
-import { DEFAULT_TIPO_CAMBIO_USD, resolveCurrencySymbol } from "../features/backoffice/utils/currency.js";
+import { DEFAULT_TIPO_CAMBIO_USD, parseTipoCambioApiResponse, resolveCurrencySymbol } from "../features/backoffice/utils/currency.js";
+import { POS_EXCHANGE_RATE_UPDATED_EVENT } from "../features/backoffice/constants/posEvents.js";
 import { pickPortalTagline } from "../features/backoffice/utils/portalConfig.js";
 import { canAccessView, getAllowedViewIds } from "../features/backoffice/utils/auth.js";
 import { displayUserName } from "../utils/authUser.js";
@@ -77,12 +78,18 @@ function lowStockFromProductosCatalog(items) {
   return out;
 }
 
+/** Alineado con breakpoint `lg` de Tailwind (1024px): móvil/tablet < 1024, escritorio >= 1024. */
+const MOBILE_MQ = "(max-width: 1023px)";
+
 export function AuthHome() {
   const { user, logout, sessionLoading } = useAuth();
   const snackbar = useSnackbar();
   const lowStockSigRef = useRef(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isNarrowViewport, setIsNarrowViewport] = useState(
+    () => (typeof window !== "undefined" ? window.matchMedia(MOBILE_MQ).matches : true)
+  );
   const [activeView, setActiveView] = useState("dashboard");
   const [currencySymbol, setCurrencySymbol] = useState("C$");
   const [tipoCambio, setTipoCambio] = useState(DEFAULT_TIPO_CAMBIO_USD);
@@ -96,6 +103,19 @@ export function AuthHome() {
     if (saved) setSidebarCollapsed(saved === "true");
   }, []);
 
+  /** No montar MobileNav en escritorio: evita cualquier fuga de `fixed` / caché con la barra móvil. */
+  useLayoutEffect(() => {
+    const mq = window.matchMedia(MOBILE_MQ);
+    const sync = () => {
+      const narrow = mq.matches;
+      setIsNarrowViewport(narrow);
+      if (!narrow) setMobileMenuOpen(false);
+    };
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
   useEffect(() => {
     let mounted = true;
     Promise.all([backofficeApi.configuraciones(), backofficeApi.configuracionTipoCambio().catch(() => null)])
@@ -104,14 +124,29 @@ export function AuthHome() {
         const list = Array.isArray(data) ? data : data?.items || [];
         setCurrencySymbol(resolveCurrencySymbol(list));
         setPortalTagline(pickPortalTagline(list));
-        const tcValue = Number(tc?.tipoCambioDolar ?? tc?.TipoCambioDolar ?? tc?.valor ?? 0);
-        if (Number.isFinite(tcValue) && tcValue > 0) setTipoCambio(tcValue);
-        else setTipoCambio(DEFAULT_TIPO_CAMBIO_USD);
+        const parsed = parseTipoCambioApiResponse(tc);
+        setTipoCambio(parsed != null ? parsed : DEFAULT_TIPO_CAMBIO_USD);
       })
       .catch(() => {});
     return () => {
       mounted = false;
     };
+  }, []);
+
+  useEffect(() => {
+    const onTcUpdated = () => {
+      void Promise.all([backofficeApi.configuraciones(), backofficeApi.configuracionTipoCambio().catch(() => null)]).then(
+        ([data, tc]) => {
+          const list = Array.isArray(data) ? data : data?.items || [];
+          setCurrencySymbol(resolveCurrencySymbol(list));
+          setPortalTagline(pickPortalTagline(list));
+          const parsed = parseTipoCambioApiResponse(tc);
+          setTipoCambio(parsed != null ? parsed : DEFAULT_TIPO_CAMBIO_USD);
+        },
+      );
+    };
+    window.addEventListener(POS_EXCHANGE_RATE_UPDATED_EVENT, onTcUpdated);
+    return () => window.removeEventListener(POS_EXCHANGE_RATE_UPDATED_EVENT, onTcUpdated);
   }, []);
 
   const toggleSidebar = () => {
@@ -131,6 +166,15 @@ export function AuthHome() {
       setActiveView(allowedViewIds[0] || "dashboard");
     }
   }, [activeView, allowedViewIds]);
+
+  /** Caché/HMR: quitar <nav> huérfano en body (portales viejos) antes de pintar. */
+  useLayoutEffect(() => {
+    for (const el of Array.from(document.body.children)) {
+      if (el instanceof HTMLElement && el.tagName === "NAV") {
+        el.remove();
+      }
+    }
+  }, []);
 
   const refreshLowStock = useCallback(async () => {
     try {
@@ -210,27 +254,29 @@ export function AuthHome() {
 
   return (
     <main className="min-h-screen min-w-0 bg-slate-100 p-4 md:p-6">
-      <MobileNav
-        open={mobileMenuOpen}
-        setOpen={setMobileMenuOpen}
-        activeView={activeView}
-        onChangeView={openView}
-        onLogout={logout}
-        sessionLoading={sessionLoading}
-        navItems={navItems}
-        topBarEnd={
-          <BackofficeShellHeaderActions
-            variant="topbar"
-            user={user}
-            logout={logout}
-            sessionLoading={sessionLoading}
-            lowStockItems={lowStockItems}
-            refreshLowStock={refreshLowStock}
-            openView={openView}
-            allowedViewIds={allowedViewIds}
-          />
-        }
-      />
+      {isNarrowViewport ? (
+        <MobileNav
+          open={mobileMenuOpen}
+          setOpen={setMobileMenuOpen}
+          activeView={activeView}
+          onChangeView={openView}
+          onLogout={logout}
+          sessionLoading={sessionLoading}
+          navItems={navItems}
+          topBarEnd={
+            <BackofficeShellHeaderActions
+              variant="topbar"
+              user={user}
+              logout={logout}
+              sessionLoading={sessionLoading}
+              lowStockItems={lowStockItems}
+              refreshLowStock={refreshLowStock}
+              openView={openView}
+              allowedViewIds={allowedViewIds}
+            />
+          }
+        />
+      ) : null}
 
       <div
         className={`grid min-h-0 w-full min-w-0 grid-cols-1 gap-4 min-h-[calc(100dvh-1rem)] md:gap-6 md:min-h-[calc(100dvh-1.5rem)] lg:gap-6 ${
@@ -249,7 +295,7 @@ export function AuthHome() {
           navItems={navItems}
         />
 
-        <section className="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-x-hidden overflow-y-auto hide-scrollbar pb-24 sm:gap-6 lg:max-h-full lg:pb-0 lg:pr-2">
+        <section className="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-x-hidden overflow-y-auto hide-scrollbar pb-4 sm:gap-6 lg:max-h-full lg:pb-0 lg:pr-2">
           {showViewHeader && (
             <header className="shrink-0 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-4">

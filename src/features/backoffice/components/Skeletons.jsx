@@ -40,7 +40,15 @@ export function ListSkeleton({ rows = 6 }) {
  */
 export function BackofficePageShell({ children, className, maxWidth = "full" }) {
   const widthCl =
-    maxWidth === "7xl" ? "mx-auto max-w-7xl" : maxWidth === "3xl" ? "mx-auto max-w-3xl" : "max-w-full";
+    maxWidth === "7xl"
+      ? "mx-auto max-w-7xl"
+      : maxWidth === "5xl"
+        ? "mx-auto max-w-5xl"
+        : maxWidth === "4xl"
+          ? "mx-auto max-w-4xl"
+          : maxWidth === "3xl"
+            ? "mx-auto max-w-3xl"
+            : "max-w-full";
   return <div className={cn("w-full min-w-0", widthCl, className)}>{children}</div>;
 }
 

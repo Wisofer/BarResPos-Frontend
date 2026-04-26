@@ -11,6 +11,16 @@ const qs = (params) => {
   return str ? `?${str}` : "";
 };
 
+/** BarRestPOS inventario: query usa `fechaInicio` / `fechaFin`, no `desde` / `hasta`. */
+const qsMovimientosInventario = (params) => {
+  const raw = { ...(params || {}) };
+  if (raw.desde != null && raw.fechaInicio == null) raw.fechaInicio = raw.desde;
+  if (raw.hasta != null && raw.fechaFin == null) raw.fechaFin = raw.hasta;
+  delete raw.desde;
+  delete raw.hasta;
+  return qs(raw);
+};
+
 export const backofficeApi = {
   dashboardResumen: (params) => api.get(`/api/v1/dashboard/resumen${qs(params)}`),
   listMesas: (params) => api.get(`/api/v1/mesas${qs(params)}`),
@@ -35,13 +45,62 @@ export const backofficeApi = {
   pedidoTrasladarMesa: (pedidoId, mesaIdDestino) =>
     api.patchWithEnvelope(`/api/v1/pedidos/${pedidoId}/mesa`, { mesaId: mesaIdDestino }),
   updatePedido: (id, body) => api.put(`/api/v1/pedidos/${id}`, body),
-  /** Cancelación unificada (mesa, delivery, llevar). Requiere PIN en configuración. */
+  /** Cancelación unificada (mesa / delivery; llevar se trata como flujo de mesa). Requiere PIN. */
   pedidoCancelar: (id, codigo) => api.post(`/api/v1/pedidos/${id}/cancelar`, { codigo }),
   listProductos: (params) => api.get(`/api/v1/productos${qs(params)}`),
   getProducto: (id) => api.get(`/api/v1/productos/${id}`),
   createProducto: (body) => api.post("/api/v1/productos", body),
   updateProducto: (id, body) => api.put(`/api/v1/productos/${id}`, body),
   deleteProducto: (id) => api.delete(`/api/v1/productos/${id}`),
+  /** GET exportar-excel: opcional categoriaId, search. */
+  exportProductosExcel: async (params) => {
+    const res = await fetch(`${getApiUrl()}/api/v1/productos/exportar-excel${qs(params)}`, {
+      headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+    });
+    if (!res.ok) throw new Error("No se pudo exportar productos.");
+    return res.blob();
+  },
+  /** GET exportar-excel: estado, desde, hasta, tipo, etc. */
+  exportPedidosExcel: async (params) => {
+    const res = await fetch(`${getApiUrl()}/api/v1/pedidos/exportar-excel${qs(params)}`, {
+      headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+    });
+    if (!res.ok) throw new Error("No se pudo exportar pedidos.");
+    return res.blob();
+  },
+  /** Sube imagen (multipart/form-data) y actualiza ImagenUrl en backend. */
+  subirImagenProducto: async (id, archivo) => {
+    const form = new FormData();
+    form.append("archivo", archivo);
+    const token = getToken();
+    const res = await fetch(`${getApiUrl()}/api/v1/productos/${encodeURIComponent(id)}/imagen`, {
+      method: "POST",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: form,
+    });
+    const text = await res.text();
+    let payload = null;
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch {
+      payload = null;
+    }
+    if (!res.ok) {
+      const msg =
+        payload?.message ||
+        payload?.Message ||
+        payload?.error ||
+        payload?.Error ||
+        `Error HTTP ${res.status}`;
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
+    }
+    const data = payload?.data ?? payload?.Data ?? payload;
+    return data;
+  },
   listProductoOpcionesGrupos: (productoId) => api.get(`/api/v1/productos/${productoId}/opciones/grupos`),
   createProductoOpcionGrupo: (productoId, body) => api.post(`/api/v1/productos/${productoId}/opciones/grupos`, body),
   updateProductoOpcionGrupo: (productoId, grupoId, body) =>
@@ -58,7 +117,16 @@ export const backofficeApi = {
   salidaStockProducto: (body) => api.post("/api/v1/productos/salida-stock", body),
   ajusteStockProducto: (body) => api.post("/api/v1/productos/ajuste-stock", body),
   movimientosProducto: (id, params) => api.get(`/api/v1/productos/${id}/movimientos${qs(params)}`),
-  movimientosProductos: (params) => api.get(`/api/v1/productos/movimientos${qs(params)}`),
+  movimientosProductos: (params) => api.get(`/api/v1/productos/movimientos${qsMovimientosInventario(params)}`),
+  /** Mismo criterio de fechas que `movimientosProductos` (GET movimientos/excel). */
+  exportMovimientosProductosExcel: async (params) => {
+    const q = qsMovimientosInventario(params);
+    const res = await fetch(`${getApiUrl()}/api/v1/productos/movimientos/excel${q}`, {
+      headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+    });
+    if (!res.ok) throw new Error("No se pudo exportar movimientos de inventario.");
+    return res.blob();
+  },
   catalogoCategoriasProducto: () => api.get("/api/v1/catalogos/categorias-producto"),
   getCategoriaProducto: (id) => api.get(`/api/v1/catalogos/categorias-producto/${id}`),
   createCategoriaProducto: (body) => api.post("/api/v1/catalogos/categorias-producto", body),
@@ -74,11 +142,34 @@ export const backofficeApi = {
   updateUsuario: (id, body) => api.put(`/api/v1/usuarios/${id}`, body),
   deleteUsuario: (id) => api.delete(`/api/v1/usuarios/${id}`),
   cajaEstado: () => api.get("/api/v1/caja/estado"),
+  /** Facturas aún no pagadas ni anuladas (cobro pendiente). */
+  cajaOrdenesPendientes: () => api.get("/api/v1/caja/ordenes-pendientes"),
   cajaApertura: (montoInicial) => api.post("/api/v1/caja/apertura", { montoInicial }),
   cajaCierrePreview: () => api.get("/api/v1/caja/cierre/preview"),
   cajaCierre: (body) => api.post("/api/v1/caja/cierre", body),
+  /** Alias (mismo endpoint) — patrón sistema-de-tienda. */
+  cajaCerrar: (body) => api.post("/api/v1/caja/cierre", body),
   cajaHistorial: (params) => api.get(`/api/v1/caja/historial${qs(params)}`),
   cajaDetalleCierre: (id) => api.get(`/api/v1/caja/cierre/${id}`),
+  /** BarRestPOS: GET /api/v1/caja/historial/excel?desde&hasta */
+  exportarCajaHistorialExcel: async (params) => {
+    const q = qs(params || {});
+    const res = await fetch(`${getApiUrl()}/api/v1/caja/historial/excel${q}`, {
+      headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+    });
+    if (!res.ok) {
+      throw new Error("No se pudo exportar el historial de caja.");
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `historial_cierres_caja_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  },
   ventasProcesarPago: (body) => api.post("/api/v1/ventas/procesar-pago", body),
   ventasGestionarPago: (body) => api.post("/api/v1/ventas/gestionar-pago", body),
   posOrdenes: (body) => api.post("/api/v1/pos/ordenes", body),
@@ -105,6 +196,17 @@ export const backofficeApi = {
   reportesProductosTop: (params) => api.get(`/api/v1/reportes/productos-top${qs(params)}`),
   reportesVentasPorMesero: (params) => api.get(`/api/v1/reportes/ventas-por-mesero${qs(params)}`),
   reportesVentasPorCategoria: (params) => api.get(`/api/v1/reportes/ventas-por-categoria${qs(params)}`),
+  reportesVentasPorCategoriaDesglose: (params) => api.get(`/api/v1/reportes/ventas-por-categoria/desglose${qs(params)}`),
+  /** Mismo rango de fechas que el reporte por categoría; `exportar=true` en query. */
+  exportReportesCategoriaDesgloseExcel: async (params) => {
+    const res = await fetch(
+      `${getApiUrl()}/api/v1/reportes/ventas-por-categoria/desglose${qs({ ...params, exportar: "true" })}`,
+      { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} },
+    );
+    if (!res.ok) throw new Error("No se pudo exportar el desglose por categoría.");
+    return res.blob();
+  },
+  reportesVentaTicketDetalle: (id) => api.get(`/api/v1/reportes/ventas/${id}/ticket-detalle`),
 
   /** Delivery: misma entidad orden/factura, origenPedido Delivery, sin mesa. */
   listDeliveryPedidos: (params) => api.get(`/api/v1/delivery/pedidos${qs(params)}`),
@@ -114,6 +216,12 @@ export const backofficeApi = {
   deliveryPedidoEnviarCocina: (id) => api.patch(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}/enviar-cocina`, {}),
   deliveryPedidoCancelar: (id, codigo) =>
     api.post(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}/cancelar`, { codigo }),
+  /**
+   * Genera link wa.me con plantilla resuelta para compartir recibo/precuenta.
+   * body opcional: { plantillaId }
+   */
+  deliveryPedidoWhatsappLink: (id, body) =>
+    api.post(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}/whatsapp-link`, body ?? {}),
   deliveryPedidoPrecuenta: (id) => api.get(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}/precuenta`),
   deliveryPedidoGestionarPago: (id, body) =>
     api.post(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}/gestionar-pago`, body),

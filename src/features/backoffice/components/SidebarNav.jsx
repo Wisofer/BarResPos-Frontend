@@ -17,7 +17,7 @@ export function SidebarNav({
         className={`flex min-w-0 items-center gap-2 sm:gap-3 ${collapsed ? "justify-center" : "justify-between"}`}
       >
         <img
-          src="/assets/images/logo.png"
+          src="/assets/images/nandofood.png"
           alt={`${APP_NAME} logo`}
           className="h-10 w-10 shrink-0 rounded-xl object-contain sm:h-11 sm:w-11"
         />

@@ -68,14 +68,14 @@ export function Sidebar({ open = true, collapsed = false, onNavigate }) {
           {!collapsed ? (
             <div className="flex items-center min-w-0 flex-1">
               <img
-                src="/assets/images/logo.png"
+                src="/assets/images/nandofood.png"
                 alt={companyName}
                 className="h-10 w-auto max-w-full object-contain object-left"
               />
             </div>
           ) : (
             <img
-              src="/assets/images/logo.png"
+              src="/assets/images/nandofood.png"
               alt={companyName}
               title={companyName}
               className="h-10 w-10 object-contain object-center"

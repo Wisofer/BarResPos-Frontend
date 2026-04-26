@@ -7,7 +7,7 @@ export function SessionLoader({ message = "Cargando..." }) {
         <div className="pointer-events-none absolute -left-8 -top-8 h-24 w-24 rounded-full bg-primary-100 blur-2xl" />
         <div className="pointer-events-none absolute -bottom-8 -right-8 h-24 w-24 rounded-full bg-emerald-100 blur-2xl" />
         <div className="relative mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <img src="/assets/images/logo.png" alt={`${APP_NAME} logo`} className="h-10 w-10 object-contain" />
+          <img src="/assets/images/nandofood.png" alt={`${APP_NAME} logo`} className="h-10 w-10 object-contain" />
         </div>
         <p className="relative mt-4 text-sm font-semibold text-slate-800">{APP_NAME}</p>
         <p className="relative mt-1 text-xs text-slate-500">{message}</p>

@@ -26,6 +26,21 @@
   }
 }
 
+/* Portales viejos (acceso rápido) añadían <nav> como hijo de body. En index.html el único
+   hijo previsto es #root, así que cualquier <nav> suelto se oculta. */
+body > nav {
+  display: none !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+/* Respaldo: si lg: falla por caché/HMR, no pintar móvil en escritorio. */
+@media (min-width: 1024px) {
+  [data-backoffice-mobilenav] {
+    display: none !important;
+  }
+}
+
 @layer utilities {
   .snackbar-item-enter {
     animation: snackbar-enter 0.3s ease-out forwards;

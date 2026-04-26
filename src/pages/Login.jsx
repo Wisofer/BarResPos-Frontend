@@ -49,7 +49,7 @@ export function Login() {
         <section className="hidden h-[640px] rounded-3xl border border-slate-200 bg-white p-9 shadow-sm lg:flex lg:flex-col lg:justify-between">
           <div className="flex items-center gap-4">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100">
-              <img src="/assets/images/logo.png" alt={`${APP_NAME} logo`} className="h-10 w-10 object-contain" />
+              <img src="/assets/images/nandofood.png" alt={`${APP_NAME} logo`} className="h-10 w-10 object-contain" />
             </div>
             <div>
               <p className="text-3xl font-bold tracking-tight text-slate-800">{APP_NAME}</p>
@@ -85,7 +85,7 @@ export function Login() {
         <section className="mx-auto w-full max-w-md rounded-3xl border border-slate-200 bg-white p-7 shadow-sm md:p-9">
           <div className="mb-5 flex justify-center">
             <img
-              src="/assets/images/logo.png"
+              src="/assets/images/nandofood.png"
               alt={`${APP_NAME} logo`}
               className="h-24 w-auto object-contain"
             />
