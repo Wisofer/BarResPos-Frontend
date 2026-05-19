@@ -9,18 +9,54 @@ import { getToken } from "../../../api/token.js";
 function normalizeRows(payload) {
   if (Array.isArray(payload)) return payload;
   const p = payload || {};
-  return p.items ?? p.Items ?? p.data ?? p.Data ?? p.rows ?? [];
+  return (
+    p.items ??
+    p.Items ??
+    p.data ??
+    p.Data ??
+    p.rows ??
+    p.Rows ??
+    p.registros ??
+    p.Registros ??
+    p.detalle ??
+    p.Detalle ??
+    p.ventas ??
+    p.Ventas ??
+    []
+  );
+}
+
+function ventaDetalleOrigenNorm(r) {
+  const v =
+    r?.origen ??
+    r?.Origen ??
+    r?.origenPedido ??
+    r?.OrigenPedido ??
+    r?.tipoOrigen ??
+    r?.TipoOrigen ??
+    "";
+  return String(v).trim().toLowerCase();
 }
 
 /** Alinea con filtros de canal del informe; no aplica búsqueda por texto. */
 function applyOrigenFilterVentaDetalle(rows, filtroVentas) {
   if (!Array.isArray(rows)) return [];
-  const o = (r) => String(r?.origen ?? r?.Origen ?? "").toLowerCase();
-  if (filtroVentas === "mesa")
+  const o = ventaDetalleOrigenNorm;
+  if (filtroVentas === "mesa") {
     return rows.filter((r) => {
       const x = o(r);
-      return x === "mesa" || x === "llevar";
+      if (!x) return true;
+      if (x === "delivery") return false;
+      return (
+        x === "mesa" ||
+        x === "llevar" ||
+        x === "salon" ||
+        x === "salón" ||
+        x === "salon-mesa" ||
+        x.startsWith("mesa")
+      );
     });
+  }
   if (filtroVentas === "delivery") return rows.filter((r) => o(r) === "delivery");
   return rows;
 }
@@ -58,7 +94,10 @@ export function useReports(showSuccess, showError) {
     if (activeReport === "ventas") {
       if (filtroVentas === "todas") p.filtroVentas = "todas";
       else if (filtroVentas === "anuladas") p.filtroVentas = "anuladas";
-      else p.filtroVentas = "activas";
+      else if (filtroVentas === "mesa" || filtroVentas === "delivery") {
+        // Canal mesa/delivery se aplica en cliente; pedir "todas" evita que el API con "activas" excluya ventas ya cobradas.
+        p.filtroVentas = "todas";
+      } else p.filtroVentas = "activas";
     }
     if (activeReport === "productos-top") p.top = topN;
     // Inventario usa `<= fechaFin`; para incluir todo el "hasta" elegido sumamos 1 día.
@@ -238,10 +277,18 @@ export function useReports(showSuccess, showError) {
     };
     const ventasDetalle = applyOrigenFilterVentaDetalle(reportData.ventasDetalle, filtroVentas);
     return {
-      ventasRows: filterByTerm(ventasDetalle, ["numero", "estado", "metodoPago", "origen", "Origen"]),
+      ventasRows: filterByTerm(ventasDetalle, [
+        "numero",
+        "estado",
+        "metodoPago",
+        "origen",
+        "Origen",
+        "origenPedido",
+        "OrigenPedido",
+      ]),
       productosTopRows: filterByTerm(reportData.productosTop, ["producto"]),
       meserosRows: filterByTerm(reportData.ventasMeseros, ["mesero", "vendedor", "usuario"]),
-      categoriasRows: filterByTerm(reportData.ventasCategorias, ["categoria"]),
+      categoriasRows: filterByTerm(reportData.ventasCategorias, ["categoria", "Categoria"]),
       movimientosRows: filterByTerm(reportData.movimientosProductos, ["productoNombre", "tipo", "subtipo"]),
     };
   }, [search, reportData, filtroVentas]);

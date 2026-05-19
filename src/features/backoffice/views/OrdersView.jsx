@@ -27,6 +27,14 @@ export function OrdersView({ currencySymbol = "C$" }) {
           editForm={om.editForm}
           setEditForm={om.setEditForm}
           onSubmitEdit={om.saveEdit}
+          onCancelPedido={() => {
+            const d = om.detailOrder;
+            if (!d?.id) return;
+            om.cancelOrder({
+              rowId: d.id,
+              id: d.numero ?? d.codigo ?? String(d.id),
+            });
+          }}
         />
         {om.confirmCancel.open && (
           <CancelPedidoPinModal

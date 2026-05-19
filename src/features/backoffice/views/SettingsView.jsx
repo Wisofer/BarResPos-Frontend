@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DollarSign, KeyRound, Pencil, Trash2 } from "lucide-react";
+import { DollarSign, Eye, EyeOff, KeyRound, Pencil, Trash2 } from "lucide-react";
 import { backofficeApi } from "../services/backofficeApi.js";
 import { BackofficeDialog, BackofficeListSkeletonLoading, BackofficePageShell } from "../components/index.js";
 import { useAuth } from "../../../contexts/AuthContext.jsx";
@@ -67,6 +67,7 @@ export function SettingsView() {
   const [sonidosNotificacion, setSonidosNotificacion] = useState(true);
   const [confirmDeleteTemplate, setConfirmDeleteTemplate] = useState({ open: false, id: null });
   const [pinCancelacionInput, setPinCancelacionInput] = useState("");
+  const [showPinCancelacion, setShowPinCancelacion] = useState(false);
   const [tipoCambioInput, setTipoCambioInput] = useState(() => tipoCambioInputTextFromApi(null));
 
   const loadAll = async () => {
@@ -337,15 +338,26 @@ export function SettingsView() {
                 >
                   PIN / código de confirmación
                 </label>
-                <input
-                  id="pin-cancelacion-venta"
-                  type="password"
-                  autoComplete="new-password"
-                  value={pinCancelacionInput}
-                  onChange={(e) => setPinCancelacionInput(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold tabular-nums text-slate-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                  placeholder="Ingresa código"
-                />
+                <div className="relative">
+                  <input
+                    id="pin-cancelacion-venta"
+                    type={showPinCancelacion ? "text" : "password"}
+                    autoComplete="new-password"
+                    value={pinCancelacionInput}
+                    onChange={(e) => setPinCancelacionInput(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-3 pr-11 text-sm font-semibold tabular-nums text-slate-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                    placeholder="Ingresa código"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPinCancelacion((s) => !s)}
+                    className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                    aria-label={showPinCancelacion ? "Ocultar código" : "Ver código"}
+                    title={showPinCancelacion ? "Ocultar" : "Ver"}
+                  >
+                    {showPinCancelacion ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
               <button
                 type="button"

@@ -8,6 +8,7 @@ export {
   StatCardsSkeleton,
 } from "./Skeletons.jsx";
 export { PosProcesarVentaModal } from "./PosProcesarVentaModal.jsx";
+export { PosActionLoadingOverlay } from "./PosActionLoadingOverlay.jsx";
 export { PosProductOpcionesModal } from "./PosProductOpcionesModal.jsx";
 export { PosInlineOpcionesPanel } from "./PosInlineOpcionesPanel.jsx";
 export { PosProductCatalogTile } from "./PosProductCatalogTile.jsx";

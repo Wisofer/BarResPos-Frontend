@@ -105,9 +105,8 @@ function FloorMesaNode({
             {!cajaAbierta && <div className="pointer-events-none absolute inset-0 z-20 rounded-md bg-slate-900/15" />}
 
             <div
-              className={`mesa-plano-handle flex cursor-grab items-center gap-0.5 border-b border-black/10 px-1 py-0.5 active:cursor-grabbing ${
-                onDark ? "bg-black/10" : "bg-slate-100"
-              }`}
+              className={`mesa-plano-handle flex cursor-grab items-center gap-0.5 border-b border-black/10 px-1 py-0.5 active:cursor-grabbing ${onDark ? "bg-black/10" : "bg-slate-100"
+                }`}
             >
               <GripVertical className={`h-3 w-3 shrink-0 ${onDark ? "text-white/80" : "text-slate-500"}`} />
               <span className={`min-w-0 flex-1 truncate text-center text-[9px] font-bold uppercase ${onDark ? "text-white" : "text-slate-800"}`}>
@@ -252,6 +251,7 @@ export function TablesMesasFloorPlan({
   onOpenPos,
   onOpenEdit,
   onRequestDelete,
+  isFullscreen = false,
 }) {
   const [positions, setPositions] = useState(() => readMesaPlanoPositions());
   const [selectedMesaId, setSelectedMesaId] = useState(null);
@@ -303,8 +303,10 @@ export function TablesMesasFloorPlan({
       maxX = Math.max(maxX, px + MESA_PLANO_BASE_W * s + pad);
       maxY = Math.max(maxY, py + MESA_PLANO_BASE_H * s + pad);
     }
-    return { width: Math.max(480, maxX), height: Math.max(360, maxY) };
-  }, [tables, positions]);
+    const defaultW = isFullscreen ? 2400 : 800;
+    const defaultH = isFullscreen ? 1400 : 500;
+    return { width: Math.max(defaultW, maxX), height: Math.max(defaultH, maxY) };
+  }, [tables, positions, isFullscreen]);
 
   if (tables.length === 0) {
     return <p className="text-sm text-slate-500">No hay mesas registradas.</p>;
@@ -315,7 +317,9 @@ export function TablesMesasFloorPlan({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="relative w-full flex-1 min-h-[min(42vh,16rem)] overflow-auto overscroll-contain rounded-xl border-2 border-dashed border-slate-300 bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[length:24px_24px] bg-slate-50 [-webkit-overflow-scrolling:touch] lg:min-h-0">
+      <div className={`relative w-full flex-1 min-h-[min(42vh,16rem)] overflow-auto overscroll-contain bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[length:24px_24px] bg-slate-50 [-webkit-overflow-scrolling:touch] lg:min-h-0 ${
+        isFullscreen ? "border-0 rounded-none" : "rounded-xl border-2 border-dashed border-slate-300"
+      }`}>
         <div
           className="relative"
           style={{ width: planContentSize.width, height: planContentSize.height }}

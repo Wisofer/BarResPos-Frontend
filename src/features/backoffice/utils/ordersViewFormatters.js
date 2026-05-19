@@ -1,5 +1,11 @@
 /** Presentación: estados, fechas y etiquetas de la vista de pedidos. */
 
+/** Pedidos cerrados contablemente o anulados: no deben editarse desde gestión. */
+export function isPedidoEstadoBloqueadoParaEdicion(estado) {
+  const e = String(estado ?? "").trim();
+  return e === "Pagado" || e === "Cancelado";
+}
+
 export function orderStatusPillClass(status) {
   if (status === "Listo") return "bg-emerald-50 text-emerald-700";
   if (status === "Entregado") return "bg-blue-50 text-blue-700";

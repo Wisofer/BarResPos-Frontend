@@ -1,9 +1,12 @@
 import { Modal } from "../../../../components/ui/Modal.jsx";
 import { formatCurrency } from "../../utils/currency.js";
 import { tableHorizontalScrollClass } from "../../utils/modalResponsiveClasses.js";
+import { reporteFilaMontoDesgloseProducto, reporteFilaNombreCategoria, reporteFilaNombreProductoDesglose } from "../../utils/reportUtils.js";
 
 export function CategoriaProductosModal({ open, onClose, loading, categoria, productos = [] }) {
-  const title = categoria ? `Productos: ${categoria.categoria || categoria.nombre || "categoría"}` : "Productos por categoría";
+  const title = categoria
+    ? `Productos: ${reporteFilaNombreCategoria(categoria)}`
+    : "Productos por categoría";
   return (
     <Modal open={open} onClose={onClose} title={title} size="xl">
       {loading ? (
@@ -22,9 +25,9 @@ export function CategoriaProductosModal({ open, onClose, loading, categoria, pro
               {productos.length ? (
                 productos.map((x, i) => (
                   <tr key={i} className="border-t border-slate-100">
-                    <td className="px-3 py-2">{x.producto || x.productoNombre || "—"}</td>
-                    <td className="px-3 py-2">{x.cantidad ?? 0}</td>
-                    <td className="px-3 py-2 font-medium">{formatCurrency(x.total ?? 0)}</td>
+                    <td className="px-3 py-2">{reporteFilaNombreProductoDesglose(x)}</td>
+                    <td className="px-3 py-2">{x.cantidad ?? x.Cantidad ?? 0}</td>
+                    <td className="px-3 py-2 font-medium">{formatCurrency(reporteFilaMontoDesgloseProducto(x))}</td>
                   </tr>
                 ))
               ) : (

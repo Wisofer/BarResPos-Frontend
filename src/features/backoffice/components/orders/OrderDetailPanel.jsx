@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, Pencil, Printer, X } from "lucide-react";
+import { ArrowLeft, Check, Pencil, Printer, X, XCircle } from "lucide-react";
 import { formatCurrency } from "../../utils/currency.js";
 import {
   pagoDescuentoAtribuidoCordobas,
@@ -11,7 +11,7 @@ import {
   pedidoSubtotalConsumoCordobas,
   pedidoTotalNetoCobradoCordobas,
 } from "../../utils/pedidoCobro.js";
-import { orderStatusPillClass, formatDateTimeLabel, labelTipoPedido } from "../../utils/ordersViewFormatters.js";
+import { orderStatusPillClass, formatDateTimeLabel, labelTipoPedido, isPedidoEstadoBloqueadoParaEdicion } from "../../utils/ordersViewFormatters.js";
 
 const ESTADOS_PEDIDO = ["Pendiente", "En cocina", "Despacho", "Listo", "Entregado", "Pagado", "Cancelado"];
 const ESTADOS_COCINA = ["Pendiente", "En cocina", "Listo", "Entregado", "Cancelado"];
@@ -37,6 +37,7 @@ export function OrderDetailPanel({
   onBack,
   onPrint,
   onStartEdit,
+  onCancelPedido,
   editForm,
   setEditForm,
   onSubmitEdit,
@@ -51,6 +52,8 @@ export function OrderDetailPanel({
   const netoCobradoDetalle = pedidoTotalNetoCobradoCordobas(detailOrder);
   const pagosDetalle = pedidoPagosLista(detailOrder);
   const estadoDetalle = String(detailOrder.estado || "");
+  const puedeEditarPedido = isAdmin && !isPedidoEstadoBloqueadoParaEdicion(estadoDetalle);
+  const puedeCancelarPedido = isAdmin && !isPedidoEstadoBloqueadoParaEdicion(estadoDetalle);
 
   return (
     <div className="min-w-0 max-w-full space-y-4">
@@ -82,7 +85,7 @@ export function OrderDetailPanel({
             <Printer className="h-4 w-4 shrink-0" />
             Imprimir
           </button>
-          {isAdmin && !showEdit && (
+          {puedeEditarPedido && !showEdit && (
             <button
               type="button"
               onClick={onStartEdit}
@@ -90,6 +93,17 @@ export function OrderDetailPanel({
             >
               <Pencil className="h-4 w-4 shrink-0" />
               Editar
+            </button>
+          )}
+          {typeof onCancelPedido === "function" && puedeCancelarPedido && !showEdit && (
+            <button
+              type="button"
+              onClick={onCancelPedido}
+              disabled={busyAction}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-red-200 bg-white px-3.5 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50"
+            >
+              <XCircle className="h-4 w-4 shrink-0" />
+              Cancelar pedido
             </button>
           )}
         </div>

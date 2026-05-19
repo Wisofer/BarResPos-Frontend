@@ -45,6 +45,8 @@ export const backofficeApi = {
   pedidoTrasladarMesa: (pedidoId, mesaIdDestino) =>
     api.patchWithEnvelope(`/api/v1/pedidos/${pedidoId}/mesa`, { mesaId: mesaIdDestino }),
   updatePedido: (id, body) => api.put(`/api/v1/pedidos/${id}`, body),
+  pedidoEliminarLinea: (pedidoId, lineaId) =>
+    api.delete(`/api/v1/pedidos/${pedidoId}/lineas/${lineaId}`),
   /** Cancelación unificada (mesa / delivery; llevar se trata como flujo de mesa). Requiere PIN. */
   pedidoCancelar: (id, codigo) => api.post(`/api/v1/pedidos/${id}/cancelar`, { codigo }),
   listProductos: (params) => api.get(`/api/v1/productos${qs(params)}`),
@@ -180,6 +182,9 @@ export const backofficeApi = {
       EstadoCocina: estado,
       estadoCocina: estado,
     }),
+  /** Salón / mesa / para llevar: envía pedido a cocina y devuelve `urlImpresionCocina` en data. */
+  pedidoEnviarCocina: (pedidoId) =>
+    api.patchWithEnvelope(`/api/v1/pedidos/${encodeURIComponent(pedidoId)}/enviar-cocina`, {}),
   cocinaOrdenes: (params) => api.get(`/api/v1/cocina/ordenes${qs(params)}`),
   configuraciones: () => api.get("/api/v1/configuraciones"),
   configuracionTipoCambio: () => api.get("/api/v1/configuraciones/tipo-cambio"),
@@ -213,7 +218,10 @@ export const backofficeApi = {
   getDeliveryPedido: (id) => api.get(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}`),
   createDeliveryPedido: (body) => api.post("/api/v1/delivery/pedidos", body),
   updateDeliveryPedido: (id, body) => api.put(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}`, body),
-  deliveryPedidoEnviarCocina: (id) => api.patch(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}/enviar-cocina`, {}),
+  deliveryEliminarLinea: (pedidoId, lineaId) =>
+    api.delete(`/api/v1/delivery/pedidos/${pedidoId}/lineas/${lineaId}`),
+  deliveryPedidoEnviarCocina: (id) =>
+    api.patchWithEnvelope(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}/enviar-cocina`, {}),
   deliveryPedidoCancelar: (id, codigo) =>
     api.post(`/api/v1/delivery/pedidos/${encodeURIComponent(id)}/cancelar`, { codigo }),
   /**

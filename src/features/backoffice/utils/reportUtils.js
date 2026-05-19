@@ -69,6 +69,39 @@ export function reporteMonedaLabel(value) {
   return raw;
 }
 
+/** Ventas por categoría (BarRestPOS): `monto` / `Monto`, no `total`. */
+export function reporteFilaMontoCategoria(row) {
+  const r = row || {};
+  const n = Number(r.monto ?? r.Monto ?? r.total ?? r.Total ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function reporteFilaNombreCategoria(row) {
+  const r = row || {};
+  const s = String(r.categoria ?? r.Categoria ?? "").trim();
+  return s || "—";
+}
+
+/** Desglose por producto dentro de una categoría (API: `monto`). */
+export function reporteFilaMontoDesgloseProducto(row) {
+  const r = row || {};
+  const n = Number(r.monto ?? r.Monto ?? r.total ?? r.Total ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function reporteFilaNombreProductoDesglose(row) {
+  const r = row || {};
+  return String(
+    r.nombreProducto ??
+      r.NombreProducto ??
+      r.productoNombre ??
+      r.ProductoNombre ??
+      r.producto ??
+      r.Producto ??
+      "",
+  ).trim() || "—";
+}
+
 export function normalizeReporteTicketDetalle(raw) {
   const d = raw || {};
   const itemsRaw = d.lineas ?? d.Lineas ?? d.items ?? d.Items ?? [];

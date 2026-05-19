@@ -50,6 +50,8 @@ export function cierreHistorialMontoPrincipal(item) {
 
 export function cierreHistorialTotalVentas(item) {
   const n = pickFirstFiniteNumber(item, [
+    "totalVentasNetas",
+    "TotalVentasNetas",
     "totalVentas",
     "TotalVentas",
     "totalGeneral",

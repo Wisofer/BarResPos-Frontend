@@ -1,6 +1,83 @@
 import { getApiUrl } from "../../../api/config.js";
 import { getToken } from "../../../api/token.js";
 
+const KITCHEN_PRINT_AUTO_FAIL_INFO =
+  "No se pudo abrir la impresión automática. Podés reintentar o imprimir desde el detalle del pedido.";
+
+/** Mensaje común tras imprimir pre-cuenta vía backend (URL/HTML). */
+export const PRECUENTA_PRINT_READY_INFO = "Pre-cuenta lista para imprimir.";
+
+const FE_COCINA_TICKET_LOGO_MARKER = "data-barrest-cocina-logo";
+
+function escapeHtmlAttr(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;");
+}
+
+/** Logo del SPA (public/) en URL absoluta para `<img>` dentro de HTML de impresión (blob). */
+export function getBundledTicketLogoAbsoluteUrl() {
+  if (typeof window === "undefined") return "";
+  try {
+    const baseUrl = window.location.origin + (import.meta.env.BASE_URL || "/");
+    const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+    return new URL("assets/images/nandofood.png", base).href;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Si el HTML de cocina no trae logo (backend sin `Tickets:LogoUrl`), añade el del SPA una sola vez.
+ * No duplica si ya inyectamos o si el ticket ya referencia el mismo asset.
+ */
+export function injectCocinaTicketLogoIfMissing(html) {
+  if (typeof html !== "string" || !html.trim()) return html;
+  if (html.includes(FE_COCINA_TICKET_LOGO_MARKER)) return html;
+  if (/\bnandofood\.png\b/i.test(html)) return html;
+  const logo = getBundledTicketLogoAbsoluteUrl();
+  if (!logo) return html;
+  const safeSrc = escapeHtmlAttr(logo);
+  const block = `<div ${FE_COCINA_TICKET_LOGO_MARKER}="1" style="text-align:center;margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid #e5e7eb"><img src="${safeSrc}" alt="" style="max-width:120px;max-height:44px;object-fit:contain" /></div>`;
+  const bodyOpen = /<body([^>]*)>/i;
+  if (bodyOpen.test(html)) {
+    return html.replace(bodyOpen, `<body$1>${block}`);
+  }
+  return `<!DOCTYPE html><html><head><meta charset="utf-8" /></head><body>${block}${html}</body></html>`;
+}
+
+function contentTypeLooksLikeHtml(contentTypeHeader) {
+  const s = (contentTypeHeader || "").toLowerCase();
+  return s.includes("text/html") || s.includes("application/xhtml+xml");
+}
+
+/**
+ * Tras fetch a `/impresion/...`: cocina fuerza print() en el iframe; otros HTML suelen traer print() en el documento (evitar doble diálogo).
+ */
+function shouldForceIframePrintAfterImpressionFetch(looksLikeHtml, cocinaLogo) {
+  return cocinaLogo ? true : !looksLikeHtml;
+}
+
+/**
+ * @param {Response} res
+ * @param {boolean} cocinaLogo
+ * @returns {Promise<{ blob: Blob; shouldPrint: boolean }>}
+ */
+async function buildImpressionBlobForPrint(res, cocinaLogo) {
+  const ct = res.headers.get("content-type") || "";
+  const looksLikeHtml = contentTypeLooksLikeHtml(ct);
+  let blob;
+  if (cocinaLogo && looksLikeHtml) {
+    const text = await res.text();
+    blob = new Blob([injectCocinaTicketLogoIfMissing(text)], { type: "text/html;charset=utf-8" });
+  } else {
+    blob = await res.blob();
+  }
+  const shouldPrint = shouldForceIframePrintAfterImpressionFetch(looksLikeHtml, cocinaLogo);
+  return { blob, shouldPrint };
+}
+
 /**
  * Rutas de tickets HTML bajo API REST (ya no MVC):
  * GET /api/v1/impresion/recibo/{pagoId}, /comanda/{ordenId}, /cocina/{ordenId}
@@ -128,8 +205,13 @@ export function printBlobInHiddenFrame(blob, options = {}) {
   });
 }
 
-/** GET con Bearer, descarga blob e intenta imprimir. */
-export async function openBackendPrintUrl(url) {
+/**
+ * GET con Bearer, descarga e intenta imprimir.
+ * @param {string} url
+ * @param {{ cocinaLogo?: boolean }} [options] — si `cocinaLogo`, inyecta logo del SPA en HTML de cocina cuando falta.
+ */
+export async function openBackendPrintUrl(url, options = {}) {
+  const { cocinaLogo = false } = options;
   if (!url) return false;
   const token = getToken();
   const resolved = resolveBackendAssetUrl(url);
@@ -143,14 +225,103 @@ export async function openBackendPrintUrl(url) {
       },
     });
     if (!res.ok) return false;
-    const blob = await res.blob();
-    const ct = (res.headers.get("content-type") || "").toLowerCase();
-    const looksLikeHtml = ct.includes("text/html") || ct.includes("application/xhtml+xml");
-    // Si es HTML, normalmente ya dispara window.print() en el backend; evitar doble diálogo.
-    return await printBlobInHiddenFrame(blob, { shouldPrint: !looksLikeHtml });
+    const { blob, shouldPrint } = await buildImpressionBlobForPrint(res, cocinaLogo);
+    return await printBlobInHiddenFrame(blob, { shouldPrint });
   } catch {
     return false;
   }
+}
+
+/** URL del ticket HTML de cocina devuelta por PATCH `.../enviar-cocina`. */
+export function extractUrlImpresionCocina(data) {
+  if (!data || typeof data !== "object") return "";
+  const u = data.urlImpresionCocina ?? data.UrlImpresionCocina ?? "";
+  return String(u || "").trim();
+}
+
+/**
+ * Tras enviar a cocina (200 + data): imprime ticket si el backend envió URL (logo incluido si faltaba en el HTML).
+ * @param {object} data — `data` del envelope API
+ * @param {{ info?: (msg: string) => void }} [snackbar] — si falla la impresión automática y hubo URL, muestra aviso
+ */
+export async function printKitchenTicketAfterEnviarCocina(data, snackbar) {
+  const url = extractUrlImpresionCocina(data);
+  if (!url) return false;
+  const printed = await openBackendPrintUrl(url, { cocinaLogo: true });
+  if (!printed && typeof snackbar?.info === "function") {
+    snackbar.info(KITCHEN_PRINT_AUTO_FAIL_INFO);
+  }
+  return printed;
+}
+
+/** Extrae URL de impresión desde respuesta típica de precuenta (mesa o delivery). */
+export function extractPrecuentaUrlFromPayload(pre) {
+  if (!pre || typeof pre !== "object") return "";
+  const u =
+    pre.urlImpresionPrecuenta ??
+    pre.UrlImpresionPrecuenta ??
+    pre.urlImpresion ??
+    pre.UrlImpresion ??
+    "";
+  return String(u || "").trim();
+}
+
+export function extractPrecuentaHtmlFromPayload(pre) {
+  if (!pre || typeof pre !== "object") return "";
+  const h = pre.htmlPrecuenta ?? pre.HtmlPrecuenta;
+  return typeof h === "string" ? h : h != null ? String(h) : "";
+}
+
+/** Intenta imprimir desde objeto precuenta: URL primero, luego HTML embebido. */
+export async function tryPrintPrecuentaFromPayload(pre) {
+  const url = extractPrecuentaUrlFromPayload(pre);
+  if (url && (await openBackendPrintUrl(url))) return true;
+  const html = extractPrecuentaHtmlFromPayload(pre);
+  if (html && (await openBackendPrintHtml(html))) return true;
+  return false;
+}
+
+/** Normaliza respuesta de endpoint *PrecuentaHtml* (string o `{ html }`). */
+export function unwrapHtmlBodyField(raw) {
+  if (raw == null) return "";
+  if (typeof raw === "string") return raw;
+  const h = raw?.html ?? raw?.Html;
+  return typeof h === "string" ? h : "";
+}
+
+export async function tryPrintHtmlBody(raw) {
+  const html = unwrapHtmlBodyField(raw);
+  if (html && (await openBackendPrintHtml(html))) return true;
+  return false;
+}
+
+export function extractReciboHtmlFromPagoResponse(resp) {
+  if (!resp || typeof resp !== "object") return "";
+  const h =
+    resp.htmlImpresionRecibo ??
+    resp.HtmlImpresionRecibo ??
+    resp.htmlPrecuenta ??
+    resp.HtmlPrecuenta ??
+    null;
+  return typeof h === "string" ? h : "";
+}
+
+export function extractReciboUrlFromPagoResponse(resp) {
+  if (!resp || typeof resp !== "object") return "";
+  return String(resp.urlImpresionRecibo ?? resp.UrlImpresionRecibo ?? resp.url ?? resp.Url ?? "").trim();
+}
+
+/** Tras cobro: prioriza HTML de recibo en cuerpo, luego URL (misma regla que POS / delivery). */
+export async function tryPrintReciboFromPagoResponse(resp) {
+  const html = extractReciboHtmlFromPagoResponse(resp);
+  if (html && (await openBackendPrintHtml(html))) return true;
+  const url = extractReciboUrlFromPagoResponse(resp);
+  if (url && (await openBackendPrintUrl(url))) return true;
+  return false;
+}
+
+export function pagoResponseHasReciboPrintChannel(resp) {
+  return !!(extractReciboHtmlFromPagoResponse(resp) || extractReciboUrlFromPagoResponse(resp));
 }
 
 /** Imprime HTML como documento temporal. */

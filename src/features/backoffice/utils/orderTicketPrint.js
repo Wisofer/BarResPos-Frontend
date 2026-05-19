@@ -1,5 +1,9 @@
 import { backofficeApi } from "../services/backofficeApi.js";
-import { openBackendPrintHtml, openBackendPrintUrl } from "./backofficePrint.js";
+import {
+  PRECUENTA_PRINT_READY_INFO,
+  tryPrintHtmlBody,
+  tryPrintPrecuentaFromPayload,
+} from "./backofficePrint.js";
 import { formatCurrency } from "./currency.js";
 import { pedidoSubtotalConsumoCordobas, pedidoDescuentoCobroCordobas, pedidoTotalNetoCobradoCordobas } from "./pedidoCobro.js";
 import { escapeHtml, formatDateTimeLabel } from "./ordersViewFormatters.js";
@@ -12,32 +16,14 @@ export async function printOrderTicket({ order, currencySymbol, snackbar }) {
   if (orderId) {
     try {
       const pre = await backofficeApi.pedidoPrecuenta(orderId);
-      const urlPrecuenta =
-        pre?.urlImpresionPrecuenta ?? pre?.UrlImpresionPrecuenta ?? pre?.urlImpresion ?? pre?.UrlImpresion ?? null;
-      const htmlPrecuenta = pre?.htmlPrecuenta ?? pre?.HtmlPrecuenta ?? null;
-
-      if (urlPrecuenta) {
-        const opened = await openBackendPrintUrl(urlPrecuenta);
-        if (opened) {
-          snackbar?.info("Pre-cuenta lista para imprimir.");
-          return;
-        }
-      }
-      if (htmlPrecuenta) {
-        const openedHtml = await openBackendPrintHtml(htmlPrecuenta);
-        if (openedHtml) {
-          snackbar?.info("Pre-cuenta lista para imprimir.");
-          return;
-        }
+      if (await tryPrintPrecuentaFromPayload(pre)) {
+        snackbar?.info(PRECUENTA_PRINT_READY_INFO);
+        return;
       }
       const htmlDirect = await backofficeApi.pedidoPrecuentaHtml(orderId).catch(() => null);
-      const directValue = typeof htmlDirect === "string" ? htmlDirect : htmlDirect?.html ?? htmlDirect?.Html ?? null;
-      if (directValue) {
-        const openedDirect = await openBackendPrintHtml(directValue);
-        if (openedDirect) {
-          snackbar?.info("Pre-cuenta lista para imprimir.");
-          return;
-        }
+      if (await tryPrintHtmlBody(htmlDirect)) {
+        snackbar?.info(PRECUENTA_PRINT_READY_INFO);
+        return;
       }
     } catch {
       // reserva local abajo

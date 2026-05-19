@@ -4,6 +4,7 @@ import {
   ArrowRightLeft,
   Bookmark,
   ChefHat,
+  Minimize2,
   Minus,
   MoreVertical,
   Pencil,
@@ -22,23 +23,26 @@ import {
   PosProductCatalogTile,
   PosProductOpcionesModal,
   PosProcesarVentaModal,
+  PosActionLoadingOverlay,
   CancelPedidoPinModal,
 } from "../components/index.js";
 import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { ConfirmModal } from "../../../components/ui/ConfirmModal.jsx";
 import { PAGINATION } from "../constants/pagination.js";
 import { DEFAULT_TIPO_CAMBIO_USD, formatCurrency } from "../utils/currency.js";
+import { clearBusyUi, runWithBusyUi } from "../utils/runWithBusyUi.js";
 import { buildUpdatePedidoPayloadForMesaChange } from "../utils/pedidoMesa.js";
 import {
   extractPosOrdenResponseId,
-  getEstadoCocinaOrden,
   getOrdenItems,
   getOrdenPedidoId,
   getPedidoMontoNumeric,
   isCajaCerradaMessageNormalized,
+  isPosOrdenVacioResponse,
   isStockShortageConflict409,
   mapBackendItemsToCart,
   normalizeApiErrorMessage,
+  parsePosBackendLineId,
   posCartToModalLines,
   posCartToPedidoItemsPayload,
   posCartToPosOrdenProductos,
@@ -46,8 +50,12 @@ import {
 } from "../utils/posPedido.js";
 import { isAdminUser } from "../utils/auth.js";
 import {
-  openBackendPrintHtml,
-  openBackendPrintUrl,
+  PRECUENTA_PRINT_READY_INFO,
+  pagoResponseHasReciboPrintChannel,
+  printKitchenTicketAfterEnviarCocina,
+  tryPrintHtmlBody,
+  tryPrintPrecuentaFromPayload,
+  tryPrintReciboFromPagoResponse,
 } from "../utils/backofficePrint.js";
 import { buildPagoPayload } from "../utils/paymentPayload.js";
 import { fetchPosProductosYCategorias } from "../utils/posCatalogLoad.js";
@@ -96,6 +104,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   const [posOrderId, setPosOrderId] = useState(null);
   const [posCommitted, setPosCommitted] = useState(false);
   const [posActionBusy, setPosActionBusy] = useState(false);
+  const [posBusyMessage, setPosBusyMessage] = useState("");
   const [posMobileTab, setPosMobileTab] = useState("products");
   const [activeTableMenu, setActiveTableMenu] = useState(null);
   const posOrderIdRef = useRef(posOrderId);
@@ -132,6 +141,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   const [posCancelPinOpen, setPosCancelPinOpen] = useState(false);
   /** "zonas" | "plano" */
   const [mesasLayoutMode, setMesasLayoutMode] = useState("zonas");
+  const [planoFullScreen, setPlanoFullScreen] = useState(false);
   const isAdmin = isAdminUser(user);
 
   const syncCajaEstado = async () => {
@@ -370,36 +380,40 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   const handleReservarMesa = async () => {
     if (!posTable || posOrderId) return;
     if (normalizeMesaEstado(posTable.status) !== "Libre") return;
-    setPosActionBusy(true);
-    setError("");
     try {
-      await backofficeApi.patchMesaEstado(posTable.id, "Reservada");
-      await loadTables();
-      await refreshPosTableFromBackend(posTable.id);
-      snackbar.success("Mesa reservada.");
+      await runWithBusyUi(
+        { setBusy: setPosActionBusy, setMessage: setPosBusyMessage, caption: "Reservando mesa…" },
+        async () => {
+          setError("");
+          await backofficeApi.patchMesaEstado(posTable.id, "Reservada");
+          await loadTables();
+          await refreshPosTableFromBackend(posTable.id);
+          snackbar.success("Mesa reservada.");
+        },
+      );
     } catch (e) {
       const msg = e?.message || "No se pudo reservar la mesa.";
       snackbar.error(msg);
-    } finally {
-      setPosActionBusy(false);
     }
   };
 
   const handleLiberarReserva = async () => {
     if (!posTable || posOrderId) return;
     if (!mesaEsReservada(posTable)) return;
-    setPosActionBusy(true);
-    setError("");
     try {
-      await backofficeApi.patchMesaEstado(posTable.id, "Libre");
-      await loadTables();
-      await refreshPosTableFromBackend(posTable.id);
-      snackbar.success("Reserva quitada; mesa libre.");
+      await runWithBusyUi(
+        { setBusy: setPosActionBusy, setMessage: setPosBusyMessage, caption: "Quitando reserva…" },
+        async () => {
+          setError("");
+          await backofficeApi.patchMesaEstado(posTable.id, "Libre");
+          await loadTables();
+          await refreshPosTableFromBackend(posTable.id);
+          snackbar.success("Reserva quitada; mesa libre.");
+        },
+      );
     } catch (e) {
       const msg = e?.message || "No se pudo quitar la reserva.";
       snackbar.error(msg);
-    } finally {
-      setPosActionBusy(false);
     }
   };
 
@@ -602,7 +616,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
           snackbar.error(stockConflict && !/^stock\b/i.test(msg) ? `Stock: ${msg}` : msg);
         }
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => {
         posSyncPendingCountRef.current = Math.max(0, posSyncPendingCountRef.current - 1);
       });
@@ -724,9 +738,38 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     void syncPosDeltaAdd(product, 1, ops, notas, rollbackLineId);
   };
 
+  const applyPosOrdenVacio = async () => {
+    setPosOrderId(null);
+    setPosCart([]);
+    posCartRef.current = [];
+    await loadTables();
+    if (posTable) await refreshPosTableFromBackend(posTable.id);
+  };
+
+  const reloadPosCartFromMesaActiva = async () => {
+    if (!posTable) return;
+    const freshRaw = await backofficeApi.getMesaOrdenActiva(posTable.id);
+    const fresh = unwrapEnvelope(freshRaw);
+    const backendItems = getOrdenItems(fresh);
+    const mapped = backendItems ? mapBackendItemsToCart(backendItems) : [];
+    setPosCart(mapped);
+    posCartRef.current = mapped;
+    const oid = getOrdenPedidoId(fresh, null);
+    setPosOrderId(oid);
+  };
+
+  const reloadPosCartFromPedido = async (ordenId) => {
+    const pedido = await backofficeApi.getPedido(ordenId);
+    const backendItems = pedido?.items ?? pedido?.Items;
+    const mapped = backendItems?.length ? mapBackendItemsToCart(backendItems) : [];
+    setPosCart(mapped);
+    posCartRef.current = mapped;
+  };
+
   const syncPosCartSnapshot = (nextCart) => {
     if (!posTable) return;
     const snapshot = Array.isArray(nextCart) ? nextCart : [];
+    posCartRef.current = snapshot;
 
     posSyncPendingCountRef.current += 1;
     posSyncChainRef.current = posSyncChainRef.current
@@ -772,12 +815,14 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
           items,
         });
 
-        const vacio = Boolean(updateResp?.vacio ?? updateResp?.Vacio);
-        if (vacio) {
-          setPosOrderId(null);
-          setPosCart([]);
-          await loadTables();
-          await refreshPosTableFromBackend(posTable.id);
+        if (isPosOrdenVacioResponse(updateResp)) {
+          if (snapshot.length > 0) {
+            snackbar.error("No se pudo actualizar la orden; recargando desde el servidor.");
+            await reloadPosCartFromMesaActiva();
+            setPosCommitted(true);
+            return;
+          }
+          await applyPosOrdenVacio();
           setPosCommitted(true);
           return;
         }
@@ -806,29 +851,73 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   };
 
   const updateCartQty = (lineId, delta) => {
-    let nextCart = [];
-    setPosCart((prev) => {
-      const next = prev
-        .map((item) =>
-          item.lineId === lineId ? { ...item, qty: Math.max(0, Number(item.qty || 0) + delta) } : item
-        )
-        .filter((item) => item.qty > 0);
-      nextCart = next;
-      return next;
-    });
+    if (posActionBusy) return;
+    const prev = posCartRef.current;
+    const item = prev.find((x) => x.lineId === lineId);
+    if (!item) return;
+    const newQty = Math.max(0, Number(item.qty || 0) + delta);
+    if (newQty <= 0) {
+      removeFromCart(lineId);
+      return;
+    }
+    const next = prev.map((x) => (x.lineId === lineId ? { ...x, qty: newQty } : x));
+    posCartRef.current = next;
+    setPosCart(next);
     setPosCommitted(false);
-    syncPosCartSnapshot(nextCart);
+    syncPosCartSnapshot(next);
   };
 
   const removeFromCart = (lineId) => {
-    let nextCart = [];
-    setPosCart((prev) => {
-      const next = prev.filter((item) => item.lineId !== lineId);
-      nextCart = next;
-      return next;
-    });
+    if (posActionBusy) return;
+    const prev = posCartRef.current;
+    const next = prev.filter((item) => item.lineId !== lineId);
+    if (next.length === prev.length) return;
+
+    posCartRef.current = next;
+    setPosCart(next);
     setPosCommitted(false);
-    syncPosCartSnapshot(nextCart);
+
+    if (!posTable) return;
+
+    const lineaId = parsePosBackendLineId(lineId);
+    const ordenId = posOrderIdRef.current;
+
+    if (!lineaId || !ordenId) {
+      syncPosCartSnapshot(next);
+      return;
+    }
+
+    posSyncPendingCountRef.current += 1;
+    posSyncChainRef.current = posSyncChainRef.current
+      .then(async () => {
+        const resp = await backofficeApi.pedidoEliminarLinea(ordenId, lineaId);
+        if (isPosOrdenVacioResponse(resp)) {
+          if (next.length === 0) {
+            await applyPosOrdenVacio();
+          } else {
+            snackbar.error("La orden quedó vacía en el servidor; recargando.");
+            await reloadPosCartFromMesaActiva();
+          }
+        } else {
+          await reloadPosCartFromPedido(ordenId);
+        }
+        setPosCommitted(true);
+      })
+      .catch(async (e) => {
+        const msg = e?.message || "No se pudo quitar el producto.";
+        snackbar.error(msg);
+        try {
+          await reloadPosCartFromMesaActiva();
+          setPosCommitted(true);
+        } catch {
+          /* ignore */
+        }
+      })
+      .finally(() => {
+        posSyncPendingCountRef.current = Math.max(0, posSyncPendingCountRef.current - 1);
+      });
+
+    void posSyncChainRef.current;
   };
 
   const updateCartNotas = (lineId, notas) => {
@@ -866,6 +955,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     setSaleModalLines([]);
     setSaleBackendTotal(null);
     setPosCancelPinOpen(false);
+    clearBusyUi(setPosActionBusy, setPosBusyMessage);
     // Refresca el listado de mesas para que se vea el cambio de estado (rojo/ocupada).
     loadTables();
   };
@@ -913,77 +1003,79 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       return;
     }
 
-    setPosActionBusy(true);
-    setError("");
     try {
-      if (posCart.length > 0) {
-        await ensurePosOrderSynced();
-      }
+      await runWithBusyUi(
+        { setBusy: setPosActionBusy, setMessage: setPosBusyMessage, caption: "Trasladando pedido…" },
+        async () => {
+          setError("");
+          if (posCart.length > 0) {
+            await ensurePosOrderSynced({ manageBusy: false });
+          }
 
-      const orderId = posOrderId ?? posOrderIdRef.current;
-      if (!orderId) throw new Error("No se encontró el pedido activo.");
+          const orderId = posOrderId ?? posOrderIdRef.current;
+          if (!orderId) throw new Error("No se encontró el pedido activo.");
 
-      let trasladarMessage = "";
-      try {
-        const env = await backofficeApi.pedidoTrasladarMesa(orderId, destId);
-        trasladarMessage = (env?.message || "").trim();
-      } catch (err) {
-        const st = err?.status;
-        if (st !== 404 && st !== 405) throw err;
-        const pedido = await backofficeApi.getPedido(orderId);
-        const body = buildUpdatePedidoPayloadForMesaChange(pedido, destId);
-        await backofficeApi.updatePedido(orderId, body);
-      }
+          let trasladarMessage = "";
+          try {
+            const env = await backofficeApi.pedidoTrasladarMesa(orderId, destId);
+            trasladarMessage = (env?.message || "").trim();
+          } catch (err) {
+            const st = err?.status;
+            if (st !== 404 && st !== 405) throw err;
+            const pedido = await backofficeApi.getPedido(orderId);
+            const body = buildUpdatePedidoPayloadForMesaChange(pedido, destId);
+            await backofficeApi.updatePedido(orderId, body);
+          }
 
-      const [, mesaRes, rawOrden] = await Promise.all([
-        loadTables(),
-        backofficeApi.getMesa(destId).catch(() => null),
-        backofficeApi.getMesaOrdenActiva(destId).catch(() => null),
-      ]);
+          const [, mesaRes, rawOrden] = await Promise.all([
+            loadTables(),
+            backofficeApi.getMesa(destId).catch(() => null),
+            backofficeApi.getMesaOrdenActiva(destId).catch(() => null),
+          ]);
 
-      let newTable;
-      if (mesaRes) {
-        newTable = mapTable(mesaRes, 0);
-      } else {
-        const fromList = moveOrderCandidates.find((t) => t.id === destId);
-        if (!fromList) throw new Error("No se pudo cargar la mesa destino.");
-        newTable = fromList;
-      }
+          let newTable;
+          if (mesaRes) {
+            newTable = mapTable(mesaRes, 0);
+          } else {
+            const fromList = moveOrderCandidates.find((t) => t.id === destId);
+            if (!fromList) throw new Error("No se pudo cargar la mesa destino.");
+            newTable = fromList;
+          }
 
-      const orderActive = unwrapEnvelope(rawOrden);
-      const nextId = getOrdenPedidoId(orderActive, orderId);
-      const backendItems = getOrdenItems(orderActive);
-      let nextCart = posCartRef.current;
-      if (backendItems?.length) {
-        nextCart = mapBackendItemsToCart(backendItems);
-      } else {
-        try {
-          const p = await backofficeApi.getPedido(nextId ?? orderId);
-          const its = p?.items ?? p?.Items;
-          if (its?.length) nextCart = mapBackendItemsToCart(its);
-        } catch {
-          /* mantiene carrito actual */
-        }
-      }
+          const orderActive = unwrapEnvelope(rawOrden);
+          const nextId = getOrdenPedidoId(orderActive, orderId);
+          const backendItems = getOrdenItems(orderActive);
+          let nextCart = posCartRef.current;
+          if (backendItems?.length) {
+            nextCart = mapBackendItemsToCart(backendItems);
+          } else {
+            try {
+              const p = await backofficeApi.getPedido(nextId ?? orderId);
+              const its = p?.items ?? p?.Items;
+              if (its?.length) nextCart = mapBackendItemsToCart(its);
+            } catch {
+              /* mantiene carrito actual */
+            }
+          }
 
-      // Un solo bloque de estado: evita un frame con mesa nueva y carrito/pedido desalineados
-      // (el efecto de carrito vacío podía dispararse mal en ese intervalo).
-      setPosTable(newTable);
-      setPosOrderId(nextId);
-      setPosCart(nextCart);
-      setPosMobileTab("order");
-      setPosCommitted(true);
-      setMoveOrderOpen(false);
-      setMoveOrderCandidates([]);
-      setMoveOrderTargetId("");
-      snackbar.success(
-        trasladarMessage || `Pedido trasladado a ${newTable.zone} · ${newTable.displayId}.`
+          // Un solo bloque de estado: evita un frame con mesa nueva y carrito/pedido desalineados
+          // (el efecto de carrito vacío podía dispararse mal en ese intervalo).
+          setPosTable(newTable);
+          setPosOrderId(nextId);
+          setPosCart(nextCart);
+          setPosMobileTab("order");
+          setPosCommitted(true);
+          setMoveOrderOpen(false);
+          setMoveOrderCandidates([]);
+          setMoveOrderTargetId("");
+          snackbar.success(
+            trasladarMessage || `Pedido trasladado a ${newTable.zone} · ${newTable.displayId}.`,
+          );
+        },
       );
     } catch (err) {
       const msg = err?.message || "No se pudo trasladar el pedido.";
       snackbar.error(msg);
-    } finally {
-      setPosActionBusy(false);
     }
   };
 
@@ -1037,13 +1129,16 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     };
   };
 
-  const ensurePosOrderSynced = async () => {
+  const ensurePosOrderSynced = async ({ manageBusy = true } = {}) => {
     if (!posTable) return posOrderId;
-    if (posActionBusy) return posOrderId;
+    if (manageBusy && posActionBusy) return posOrderId;
 
-    await posSyncChainRef.current.catch(() => {});
+    await posSyncChainRef.current.catch(() => { });
 
-    setPosActionBusy(true);
+    if (manageBusy) {
+      setPosBusyMessage("Sincronizando orden…");
+      setPosActionBusy(true);
+    }
     setError("");
     try {
       // Aseguramos que exista la orden activa (si por algún motivo no existe aún).
@@ -1125,7 +1220,9 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
       snackbar.error(stockConflict && !/^stock\b/i.test(msg) ? `Stock: ${msg}` : msg);
       throw e;
     } finally {
-      setPosActionBusy(false);
+      if (manageBusy) {
+        clearBusyUi(setPosActionBusy, setPosBusyMessage);
+      }
     }
   };
 
@@ -1140,46 +1237,48 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
 
   const executePosCancelarConPin = async (codigo) => {
     if (!posTable || !posOrderId) throw new Error("No hay orden para cancelar.");
-    setPosActionBusy(true);
-    setError("");
-    try {
-      await backofficeApi.posCancelarOrden(posOrderId, codigo);
-      snackbar.success("Pedido cancelado y mesa liberada.");
-      setPosCancelPinOpen(false);
-      closePosView();
-      await loadTables();
-    } finally {
-      setPosActionBusy(false);
-    }
+    await runWithBusyUi(
+      { setBusy: setPosActionBusy, setMessage: setPosBusyMessage, caption: "Cancelando pedido…" },
+      async () => {
+        setError("");
+        await backofficeApi.posCancelarOrden(posOrderId, codigo);
+        snackbar.success("Pedido cancelado y mesa liberada.");
+        setPosCancelPinOpen(false);
+        closePosView();
+        await loadTables();
+      },
+    );
   };
 
   const handleEnviarCocina = async () => {
     if (!posTable) return;
     if (posActionBusy) return;
     try {
-      if (posCart.length > 0) await ensurePosOrderSynced();
-      if (!posOrderId) throw new Error("No hay orden activa para enviar a cocina.");
+      await runWithBusyUi(
+        { setBusy: setPosActionBusy, setMessage: setPosBusyMessage, caption: "Enviando a cocina…" },
+        async () => {
+          if (posCart.length > 0) await ensurePosOrderSynced({ manageBusy: false });
+          if (!posOrderId) throw new Error("No hay orden activa para enviar a cocina.");
 
-      // Si la orden ya existía (posCart vacío), cargamos items para mantener UI sincronizada.
-      if (!posCommitted && posCart.length === 0) {
-        const freshRaw = await backofficeApi.getMesaOrdenActiva(posTable.id).catch(() => null);
-        const fresh = unwrapEnvelope(freshRaw);
-        const items = getOrdenItems(fresh);
-        if (items) setPosCart(mapBackendItemsToCart(items));
-        setPosCommitted(true);
-      }
+          // Si la orden ya existía (posCart vacío), cargamos items para mantener UI sincronizada.
+          if (!posCommitted && posCart.length === 0) {
+            const freshRaw = await backofficeApi.getMesaOrdenActiva(posTable.id).catch(() => null);
+            const fresh = unwrapEnvelope(freshRaw);
+            const items = getOrdenItems(fresh);
+            if (items) setPosCart(mapBackendItemsToCart(items));
+            setPosCommitted(true);
+          }
 
-      // Para que "Enviar cocina" haga algo real, sincronizamos el EstadoCocina.
-      const freshRaw2 = await backofficeApi.getMesaOrdenActiva(posTable.id).catch(() => null);
-      const fresh2 = unwrapEnvelope(freshRaw2);
-      const estadoCocinaActual = getEstadoCocinaOrden(fresh2);
+          const { data, message } = await backofficeApi.pedidoEnviarCocina(posOrderId);
+          const infoMsg = typeof message === "string" ? message.trim() : "";
+          if (infoMsg) snackbar.info(infoMsg);
+          else snackbar.success("Orden enviada a cocina.");
 
-      // Si ya está "Listo", mantenemos. Si está "Pendiente", lo movemos a "En Preparación".
-      const nextEstadoCocina = estadoCocinaActual === "Pendiente" ? "En Preparación" : "Listo";
-      await backofficeApi.cocinaOrdenEstado(posOrderId, nextEstadoCocina);
+          await printKitchenTicketAfterEnviarCocina(data, snackbar);
 
-      snackbar.success("Orden enviada a cocina.");
-      setPosMobileTab("order");
+          closePosView();
+        },
+      );
     } catch (e) {
       const msg = e?.message || "No se pudo enviar a cocina.";
       snackbar.error(msg);
@@ -1189,37 +1288,42 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   const openProcesarVentaModal = async () => {
     if (!posTable) return;
     if (posActionBusy || saleProcessing) return;
-    setError("");
     try {
-      if (posCart.length > 0) await ensurePosOrderSynced();
+      await runWithBusyUi(
+        { setBusy: setPosActionBusy, setMessage: setPosBusyMessage, caption: "Preparando cobro…" },
+        async () => {
+          setError("");
+          if (posCart.length > 0) await ensurePosOrderSynced({ manageBusy: false });
 
-      let ordenId = posOrderId ?? posOrderIdRef.current;
-      let lines = posCartToModalLines(posCart);
+          let ordenId = posOrderId ?? posOrderIdRef.current;
+          let lines = posCartToModalLines(posCart);
 
-      if (lines.length === 0) {
-        const raw = await backofficeApi.getMesaOrdenActiva(posTable.id);
-        const order = unwrapEnvelope(raw);
-        if (!order) throw new Error("No hay orden activa para cobrar.");
-        ordenId = getOrdenPedidoId(order, ordenId);
-        const backendItems = getOrdenItems(order);
-        if (!backendItems?.length) throw new Error("La orden no tiene productos.");
-        lines = posCartToModalLines(mapBackendItemsToCart(backendItems));
-      }
+          if (lines.length === 0) {
+            const raw = await backofficeApi.getMesaOrdenActiva(posTable.id);
+            const order = unwrapEnvelope(raw);
+            if (!order) throw new Error("No hay orden activa para cobrar.");
+            ordenId = getOrdenPedidoId(order, ordenId);
+            const backendItems = getOrdenItems(order);
+            if (!backendItems?.length) throw new Error("La orden no tiene productos.");
+            lines = posCartToModalLines(mapBackendItemsToCart(backendItems));
+          }
 
-      if (!ordenId) throw new Error("No hay orden activa para cobrar.");
+          if (!ordenId) throw new Error("No hay orden activa para cobrar.");
 
-      let totalBackend = null;
-      try {
-        const pedido = await backofficeApi.getPedido(ordenId);
-        totalBackend = getPedidoMontoNumeric(pedido);
-      } catch {
-        /* ignore */
-      }
+          let totalBackend = null;
+          try {
+            const pedido = await backofficeApi.getPedido(ordenId);
+            totalBackend = getPedidoMontoNumeric(pedido);
+          } catch {
+            /* ignore */
+          }
 
-      setSaleModalLines(lines);
-      setSaleBackendTotal(totalBackend);
-      setSaleOrdenId(ordenId);
-      setSaleModalOpen(true);
+          setSaleModalLines(lines);
+          setSaleBackendTotal(totalBackend);
+          setSaleOrdenId(ordenId);
+          setSaleModalOpen(true);
+        },
+      );
     } catch (e) {
       const msg = e?.message || "No se pudo abrir cobro.";
       snackbar.error(msg);
@@ -1246,21 +1350,8 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
         resp = await backofficeApi.ventasProcesarPago(payload);
       }
 
-      const url = resp?.urlImpresionRecibo ?? resp?.UrlImpresionRecibo ?? resp?.url ?? resp?.Url;
-      const html =
-        resp?.htmlImpresionRecibo ??
-        resp?.HtmlImpresionRecibo ??
-        resp?.htmlPrecuenta ??
-        resp?.HtmlPrecuenta ??
-        null;
-
-      // Preferimos iframe oculto para evitar que el navegador abra otra pestaña.
-      if (html && typeof html === "string") {
-        const ok = await openBackendPrintHtml(html);
-        if (!ok) snackbar.error("No se pudo imprimir el recibo.");
-      } else if (url) {
-        const ok = await openBackendPrintUrl(url);
-        if (!ok) snackbar.error("No se pudo imprimir el recibo.");
+      if (pagoResponseHasReciboPrintChannel(resp) && !(await tryPrintReciboFromPagoResponse(resp))) {
+        snackbar.error("No se pudo imprimir el recibo.");
       }
 
       snackbar.success("Venta procesada.");
@@ -1283,85 +1374,72 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
   const handleImprimirCuenta = async () => {
     if (!posTable) return;
     if (posActionBusy || saleProcessing) return;
-    setError("");
     try {
-      if (posCart.length > 0) await ensurePosOrderSynced();
-      let ordenId = posOrderId ?? posOrderIdRef.current;
+      await runWithBusyUi(
+        { setBusy: setPosActionBusy, setMessage: setPosBusyMessage, caption: "Imprimiendo cuenta…" },
+        async () => {
+          setError("");
+          if (posCart.length > 0) await ensurePosOrderSynced({ manageBusy: false });
+          let ordenId = posOrderId ?? posOrderIdRef.current;
 
-      if (!ordenId) {
-        const raw = await backofficeApi.getMesaOrdenActiva(posTable.id);
-        const order = unwrapEnvelope(raw);
-        if (!order) throw new Error("No hay orden para imprimir.");
-        ordenId = getOrdenPedidoId(order, null);
-      }
-      if (!ordenId) throw new Error("No se encontró el ID de la orden.");
+          if (!ordenId) {
+            const raw = await backofficeApi.getMesaOrdenActiva(posTable.id);
+            const order = unwrapEnvelope(raw);
+            if (!order) throw new Error("No hay orden para imprimir.");
+            ordenId = getOrdenPedidoId(order, null);
+          }
+          if (!ordenId) throw new Error("No se encontró el ID de la orden.");
 
-      // Flujo oficial backend: pre-cuenta sin pagar.
-      const pre = await backofficeApi.pedidoPrecuenta(ordenId);
-      const urlPrecuenta =
-        pre?.urlImpresionPrecuenta ??
-        pre?.UrlImpresionPrecuenta ??
-        pre?.urlImpresion ??
-        pre?.UrlImpresion ??
-        null;
-      const htmlPrecuenta = pre?.htmlPrecuenta ?? pre?.HtmlPrecuenta ?? null;
+          // Flujo oficial backend: pre-cuenta sin pagar.
+          const pre = await backofficeApi.pedidoPrecuenta(ordenId);
+          if (await tryPrintPrecuentaFromPayload(pre)) {
+            snackbar.info(PRECUENTA_PRINT_READY_INFO);
+            return;
+          }
 
-      if (urlPrecuenta) {
-        const opened = await openBackendPrintUrl(urlPrecuenta);
-        if (opened) {
-          snackbar.info("Pre-cuenta lista para imprimir.");
-          return;
-        }
-      }
+          try {
+            const rawHtml = await backofficeApi.pedidoPrecuentaHtml(ordenId);
+            if (await tryPrintHtmlBody(rawHtml)) {
+              snackbar.info(PRECUENTA_PRINT_READY_INFO);
+              return;
+            }
+          } catch {
+            /* continue to local fallback */
+          }
 
-      if (htmlPrecuenta && (await openBackendPrintHtml(htmlPrecuenta))) {
-        snackbar.info("Pre-cuenta lista para imprimir.");
-        return;
-      }
+          let lines = posCartToModalLines(posCart);
 
-      // Fallback oficial: endpoint HTML directo.
-      try {
-        const rawHtml = await backofficeApi.pedidoPrecuentaHtml(ordenId);
-        const htmlDirect = typeof rawHtml === "string" ? rawHtml : rawHtml?.html ?? rawHtml?.Html ?? null;
-        if (htmlDirect && (await openBackendPrintHtml(htmlDirect))) {
-          snackbar.info("Pre-cuenta lista para imprimir.");
-          return;
-        }
-      } catch {
-        /* continue to local fallback */
-      }
+          if (lines.length === 0) {
+            const raw = await backofficeApi.getMesaOrdenActiva(posTable.id);
+            const order = unwrapEnvelope(raw);
+            if (!order) throw new Error("No hay orden para imprimir.");
+            const backendItems = getOrdenItems(order);
+            if (!backendItems?.length) throw new Error("No hay productos en la orden.");
+            lines = posCartToModalLines(mapBackendItemsToCart(backendItems));
+          }
 
-      let lines = posCartToModalLines(posCart);
+          let total = lines.reduce((s, x) => s + x.lineTotal, 0);
+          const oid = posOrderId ?? posOrderIdRef.current;
+          if (oid) {
+            try {
+              const pedido = await backofficeApi.getPedido(oid);
+              const m = getPedidoMontoNumeric(pedido);
+              if (m != null) total = m;
+            } catch {
+              /* ignore */
+            }
+          }
 
-      if (lines.length === 0) {
-        const raw = await backofficeApi.getMesaOrdenActiva(posTable.id);
-        const order = unwrapEnvelope(raw);
-        if (!order) throw new Error("No hay orden para imprimir.");
-        const backendItems = getOrdenItems(order);
-        if (!backendItems?.length) throw new Error("No hay productos en la orden.");
-        lines = posCartToModalLines(mapBackendItemsToCart(backendItems));
-      }
-
-      let total = lines.reduce((s, x) => s + x.lineTotal, 0);
-      const oid = posOrderId ?? posOrderIdRef.current;
-      if (oid) {
-        try {
-          const pedido = await backofficeApi.getPedido(oid);
-          const m = getPedidoMontoNumeric(pedido);
-          if (m != null) total = m;
-        } catch {
-          /* ignore */
-        }
-      }
-
-      openPreCuentaPrint({
-        mesaLabel: posTable.displayId,
-        zoneLabel: posTable.zone,
-        lines,
-        total,
-        currency: currencySymbol,
-      });
-      snackbar.info("Pre-cuenta lista para imprimir (modo local).");
+          openPreCuentaPrint({
+            mesaLabel: posTable.displayId,
+            zoneLabel: posTable.zone,
+            lines,
+            total,
+            currency: currencySymbol,
+          });
+          snackbar.info("Pre-cuenta lista para imprimir (modo local).");
+        },
+      );
     } catch (e) {
       const msg = e?.message || "No se pudo imprimir la cuenta.";
       snackbar.error(msg);
@@ -1383,6 +1461,17 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, [activeTableMenu]);
+
+  useEffect(() => {
+    if (!planoFullScreen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        setPlanoFullScreen(false);
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [planoFullScreen]);
 
   if (loading) {
     return <BackofficeStatCardsListSkeleton listRows={5} />;
@@ -1475,18 +1564,16 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
             <button
               type="button"
               onClick={() => setPosMobileTab("products")}
-              className={`rounded-lg px-3 py-2 text-xs font-semibold ${
-                posMobileTab === "products" ? "bg-slate-900 text-white" : "border border-slate-300 bg-white text-slate-700"
-              }`}
+              className={`rounded-lg px-3 py-2 text-xs font-semibold ${posMobileTab === "products" ? "bg-slate-900 text-white" : "border border-slate-300 bg-white text-slate-700"
+                }`}
             >
               Productos
             </button>
             <button
               type="button"
               onClick={() => setPosMobileTab("order")}
-              className={`rounded-lg px-3 py-2 text-xs font-semibold ${
-                posMobileTab === "order" ? "bg-slate-900 text-white" : "border border-slate-300 bg-white text-slate-700"
-              }`}
+              className={`rounded-lg px-3 py-2 text-xs font-semibold ${posMobileTab === "order" ? "bg-slate-900 text-white" : "border border-slate-300 bg-white text-slate-700"
+                }`}
             >
               Orden ({posCart.length})
             </button>
@@ -1609,11 +1696,11 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                         <XCircle className="h-3.5 w-3.5" />
                         Cancelar
                       </button>
-                      <button type="button" onClick={handleImprimirCuenta} disabled={posActionBusy} className="inline-flex items-center justify-center gap-1 rounded-sm bg-sky-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
+                      <button type="button" onClick={handleImprimirCuenta} disabled={posActionBusy || saleProcessing} className="inline-flex items-center justify-center gap-1 rounded-sm bg-sky-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
                         <Printer className="h-3.5 w-3.5" />
                         Imprimir cuenta
                       </button>
-                      <button type="button" onClick={handleEnviarCocina} disabled={posActionBusy} className="inline-flex items-center justify-center gap-1 rounded-sm bg-amber-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
+                      <button type="button" onClick={handleEnviarCocina} disabled={posActionBusy || saleProcessing} className="inline-flex items-center justify-center gap-1 rounded-sm bg-amber-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
                         <ChefHat className="h-3.5 w-3.5" />
                         Enviar cocina
                       </button>
@@ -1631,11 +1718,11 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                       <XCircle className="h-3.5 w-3.5" />
                       Cancelar
                     </button>
-                    <button type="button" onClick={handleImprimirCuenta} disabled={posActionBusy} className="inline-flex items-center justify-center gap-1 rounded-sm bg-sky-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
+                    <button type="button" onClick={handleImprimirCuenta} disabled={posActionBusy || saleProcessing} className="inline-flex items-center justify-center gap-1 rounded-sm bg-sky-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
                       <Printer className="h-3.5 w-3.5" />
                       Imprimir cuenta
                     </button>
-                    <button type="button" onClick={handleEnviarCocina} disabled={posActionBusy} className="inline-flex items-center justify-center gap-1 rounded-sm bg-amber-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
+                    <button type="button" onClick={handleEnviarCocina} disabled={posActionBusy || saleProcessing} className="inline-flex items-center justify-center gap-1 rounded-sm bg-amber-500 px-2 py-2 text-[11px] font-semibold text-white disabled:opacity-60">
                       <ChefHat className="h-3.5 w-3.5" />
                       Enviar cocina
                     </button>
@@ -1766,11 +1853,11 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                     <XCircle className="h-3.5 w-3.5" />
                     Cancelar
                   </button>
-                  <button type="button" onClick={handleImprimirCuenta} disabled={posActionBusy} className="inline-flex items-center gap-1 rounded-sm bg-sky-500 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60">
+                  <button type="button" onClick={handleImprimirCuenta} disabled={posActionBusy || saleProcessing} className="inline-flex items-center gap-1 rounded-sm bg-sky-500 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60">
                     <Printer className="h-3.5 w-3.5" />
                     Imprimir cuenta
                   </button>
-                  <button type="button" onClick={handleEnviarCocina} disabled={posActionBusy} className="inline-flex items-center gap-1 rounded-sm bg-amber-500 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60">
+                  <button type="button" onClick={handleEnviarCocina} disabled={posActionBusy || saleProcessing} className="inline-flex items-center gap-1 rounded-sm bg-amber-500 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60">
                     <ChefHat className="h-3.5 w-3.5" />
                     Enviar cocina
                   </button>
@@ -1837,6 +1924,12 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
             if (!p) return;
             confirmAddProductWithOpciones(p, opcionesSeleccionadas);
           }}
+        />
+
+        <PosActionLoadingOverlay
+          open={Boolean(posActionBusy || saleProcessing)}
+          saleProcessing={saleProcessing}
+          detailMessage={posBusyMessage}
         />
 
         <PosProcesarVentaModal
@@ -1911,6 +2004,71 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
     );
   }
 
+  if (planoFullScreen && !posOpen) {
+    return (
+      <div className="fixed inset-0 z-[100] flex flex-col bg-slate-50 select-none font-sans text-slate-800">
+        {/* Cabecera premium en tono claro, ultra-limpia */}
+        <header className="shrink-0 bg-white border-b border-slate-200 px-4 py-3.5 md:px-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="h-2.5 w-2.5 animate-ping rounded-full bg-emerald-500" />
+            <h2 className="text-lg font-extrabold tracking-tight text-slate-800 sm:text-xl flex items-center gap-2">
+              📍 Plano de Distribución de Mesas
+            </h2>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            {/* Stats en tono claro con bordes suaves */}
+            <span className="rounded-lg bg-slate-100 border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600">
+              Total: <span className="font-bold text-slate-900">{tables.length}</span>
+            </span>
+            <span className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+              Libres: <span className="font-bold text-emerald-950">{mesaStats.libres}</span>
+            </span>
+            <span className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700">
+              Ocupadas: <span className="font-bold text-rose-950">{mesaStats.ocupadas}</span>
+            </span>
+            <span className="rounded-lg bg-violet-50 border border-violet-200 px-3 py-1.5 text-xs font-semibold text-violet-800">
+              Reservadas: <span className="font-bold text-violet-950">{mesaStats.reservadas}</span>
+            </span>
+            <span className={`rounded-lg px-3 py-1.5 text-xs font-semibold border ${cajaAbierta
+                ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                : "bg-rose-50 border-rose-200 text-rose-700"
+              }`}>
+              Caja: {cajaAbierta ? "Abierta" : "Cerrada"}
+            </span>
+
+            {/* Botón Salir en tono claro premium */}
+            <button
+              type="button"
+              onClick={() => setPlanoFullScreen(false)}
+              className="ml-2 rounded-lg bg-slate-100 border border-slate-200 hover:bg-slate-200 active:scale-95 px-4 py-2 text-xs font-bold text-slate-700 inline-flex items-center gap-1.5 transition duration-150 ease-in-out shadow-sm cursor-pointer"
+              title="Salir de pantalla completa (Esc)"
+            >
+              <Minimize2 className="h-3.5 w-3.5 text-slate-600" />
+              Salir
+            </button>
+          </div>
+        </header>
+
+        {/* El plano ocupa TODO el espacio restante, eliminamos bordes y márgenes de tarjeta */}
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col bg-slate-50 relative">
+          <TablesMesasFloorPlan
+            tables={mesasPlanoList}
+            cajaAbierta={cajaAbierta}
+            isAdmin={isAdmin}
+            tableIllustration={tableIllustration}
+            activeTableMenu={activeTableMenu}
+            setActiveTableMenu={setActiveTableMenu}
+            onOpenPos={openPosView}
+            onOpenEdit={openEdit}
+            onRequestDelete={(id) => setConfirmDeleteTable({ open: true, id })}
+            isFullscreen={true}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={
@@ -1937,6 +2095,7 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
             onNuevaMesa={openCreate}
             layoutMode={mesasLayoutMode}
             onLayoutModeChange={setMesasLayoutMode}
+            onToggleMaximize={() => setPlanoFullScreen(true)}
           />
         </div>
 
@@ -2068,45 +2227,44 @@ export function TablesView({ onPosOpenChange, currencySymbol = "C$" }) {
                 {locations
                   .filter((l) => showInactiveLocations || l.activo !== false)
                   .map((l) => (
-                  <article
-                    key={l.id}
-                    className={`flex items-start justify-between gap-3 rounded-lg border p-3 ${
-                      l.activo === false ? "border-slate-200 bg-slate-50 opacity-80" : "border-slate-200 bg-white"
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-800">{l.nombre || l.descripcion || `Ubicación ${l.id}`}</p>
-                      <p className="truncate text-xs text-slate-500">{l.descripcion || "-"}</p>
-                    </div>
-                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                      {l.activo === false ? (
+                    <article
+                      key={l.id}
+                      className={`flex items-start justify-between gap-3 rounded-lg border p-3 ${l.activo === false ? "border-slate-200 bg-slate-50 opacity-80" : "border-slate-200 bg-white"
+                        }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-800">{l.nombre || l.descripcion || `Ubicación ${l.id}`}</p>
+                        <p className="truncate text-xs text-slate-500">{l.descripcion || "-"}</p>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                        {l.activo === false ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleLocationActive(l, true)}
+                            className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                          >
+                            Reactivar
+                          </button>
+                        ) : null}
                         <button
                           type="button"
-                          onClick={() => toggleLocationActive(l, true)}
-                          className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                          onClick={() => editLocation(l.id)}
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
                         >
-                          Reactivar
+                          <Pencil className="h-3.5 w-3.5" />
+                          Editar
                         </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => editLocation(l.id)}
-                        className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDeleteLocation({ open: true, id: l.id, name: l.nombre || `Ubicación ${l.id}` })}
-                        className="inline-flex items-center gap-1 rounded-md bg-red-500 px-2 py-1 text-[11px] font-semibold text-white hover:bg-red-600"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Eliminar
-                      </button>
-                    </div>
-                  </article>
-                ))}
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteLocation({ open: true, id: l.id, name: l.nombre || `Ubicación ${l.id}` })}
+                          className="inline-flex items-center gap-1 rounded-md bg-red-500 px-2 py-1 text-[11px] font-semibold text-white hover:bg-red-600"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Eliminar
+                        </button>
+                      </div>
+                    </article>
+                  ))}
               </div>
             </div>
           </div>

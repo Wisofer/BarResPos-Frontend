@@ -1,6 +1,7 @@
-import { Eye } from "lucide-react";
+import { Boxes, Eye } from "lucide-react";
 import { formatCurrency } from "../../utils/currency.js";
 import { formatDateTime } from "../../utils/reportDates.js";
+import { reporteFilaMontoCategoria, reporteFilaNombreCategoria } from "../../utils/reportUtils.js";
 import { tableHorizontalScrollClass } from "../../utils/modalResponsiveClasses.js";
 import {
   cierreFechaRaw,
@@ -12,11 +13,12 @@ import {
   cierreId,
 } from "../../utils/caja.js";
 
-function EmptyRow({ colSpan, loading }) {
+function EmptyRow({ colSpan, loading, hint }) {
   return (
     <tr>
       <td colSpan={colSpan} className="py-8 text-center text-sm text-slate-500">
         {loading ? "Cargando…" : "Sin resultados."}
+        {!loading && hint ? <p className="mt-2 max-w-md text-xs text-slate-400">{hint}</p> : null}
       </td>
     </tr>
   );
@@ -57,21 +59,26 @@ export function ReportTables({
           <tbody>
             {ventasRows.length ? (
               ventasRows.map((x, idx) => (
-                <tr key={`${x.id}-${idx}`} className="border-t border-slate-100">
-                  <td className="px-3 py-2">{formatDateTime(x.fecha)}</td>
-                  <td className="px-3 py-2 font-medium text-slate-800">{x.numero || "—"}</td>
-                  <td className="px-3 py-2">{x.estado || "—"}</td>
-                  <td className="px-3 py-2">{x.metodoPago || "—"}</td>
-                  <td className="px-3 py-2">{x.moneda || "—"}</td>
-                  <td className="px-3 py-2 font-semibold">{formatCurrency(x.totalCobrado ?? x.total ?? 0)}</td>
+                <tr key={`${x.id ?? x.Id ?? idx}-${idx}`} className="border-t border-slate-100">
+                  <td className="px-3 py-2">
+                    {formatDateTime(x.fecha ?? x.Fecha ?? x.fechaVenta ?? x.FechaVenta ?? x.fechaCierre ?? x.FechaCierre)}
+                  </td>
+                  <td className="px-3 py-2 font-medium text-slate-800">{x.numero ?? x.Numero ?? "—"}</td>
+                  <td className="px-3 py-2">{x.estado ?? x.Estado ?? "—"}</td>
+                  <td className="px-3 py-2">{x.metodoPago ?? x.MetodoPago ?? "—"}</td>
+                  <td className="px-3 py-2">{x.moneda ?? x.Moneda ?? "—"}</td>
+                  <td className="px-3 py-2 font-semibold">
+                    {formatCurrency(x.totalCobrado ?? x.TotalCobrado ?? x.total ?? x.Total ?? 0)}
+                  </td>
                   <td className="px-3 py-2">
                     <button
                       type="button"
-                      onClick={() => onOpenVentaDetail(x.id ?? x.Id)}
-                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-primary-700 hover:bg-primary-50"
+                      onClick={() => onOpenVentaDetail(x.id ?? x.Id ?? x.ventaId ?? x.VentaId)}
+                      className="inline-flex items-center justify-center rounded-lg p-2 text-primary-700 hover:bg-primary-50"
+                      title="Ver detalle"
+                      aria-label="Ver detalle de la venta"
                     >
                       <Eye className="h-4 w-4" />
-                      Ver
                     </button>
                   </td>
                 </tr>
@@ -159,16 +166,18 @@ export function ReportTables({
             {categoriasRows.length ? (
               categoriasRows.map((x, idx) => (
                 <tr key={idx} className="border-t border-slate-100">
-                  <td className="px-3 py-2">{x.categoria || "—"}</td>
-                  <td className="px-3 py-2">{x.cantidad ?? 0}</td>
-                  <td className="px-3 py-2 font-semibold">{formatCurrency(x.total ?? 0)}</td>
+                  <td className="px-3 py-2">{reporteFilaNombreCategoria(x)}</td>
+                  <td className="px-3 py-2">{x.cantidad ?? x.Cantidad ?? 0}</td>
+                  <td className="px-3 py-2 font-semibold">{formatCurrency(reporteFilaMontoCategoria(x))}</td>
                   <td className="px-3 py-2">
                     <button
                       type="button"
                       onClick={() => onOpenCategoriaProductos(x)}
-                      className="text-xs text-primary-700 hover:underline"
+                      className="inline-flex items-center justify-center rounded-lg p-2 text-primary-700 hover:bg-primary-50"
+                      title="Ver productos"
+                      aria-label="Ver productos de la categoría"
                     >
-                      Ver productos
+                      <Boxes className="h-4 w-4" />
                     </button>
                   </td>
                 </tr>
@@ -275,7 +284,10 @@ export function ReportTables({
               </tr>
             ))
           ) : (
-            <EmptyRow colSpan={4} />
+            <EmptyRow
+              colSpan={4}
+              hint="Son movimientos de inventario (entradas, salidas, ajustes), no el listado de ventas. Solo aparecen si hay registros en inventario para el rango de fechas."
+            />
           )}
         </tbody>
       </table>

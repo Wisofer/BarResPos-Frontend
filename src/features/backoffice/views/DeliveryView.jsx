@@ -23,16 +23,28 @@ import {
   PosProductCatalogTile,
   PosProductOpcionesModal,
   PosProcesarVentaModal,
+  PosActionLoadingOverlay,
   CancelPedidoPinModal,
 } from "../components/index.js";
 import { PAGINATION } from "../constants/pagination.js";
 import { DEFAULT_TIPO_CAMBIO_USD, formatCurrency } from "../utils/currency.js";
 import {
-  openBackendPrintHtml,
-  openBackendPrintUrl,
+  PRECUENTA_PRINT_READY_INFO,
+  pagoResponseHasReciboPrintChannel,
+  printKitchenTicketAfterEnviarCocina,
+  tryPrintHtmlBody,
+  tryPrintPrecuentaFromPayload,
+  tryPrintReciboFromPagoResponse,
 } from "../utils/backofficePrint.js";
 import { buildPagoPayload } from "../utils/paymentPayload.js";
-import { getPedidoMontoNumeric, mapBackendItemsToCart, posCartToModalLines } from "../utils/posPedido.js";
+import { clearBusyUi, runWithBusyUi } from "../utils/runWithBusyUi.js";
+import {
+  getPedidoMontoNumeric,
+  isPosOrdenVacioResponse,
+  mapBackendItemsToCart,
+  parsePosBackendLineId,
+  posCartToModalLines,
+} from "../utils/posPedido.js";
 import { buildDeliveryPedidoBody, mapDeliveryListRow } from "../utils/deliveryPedido.js";
 import { fetchPosProductosYCategorias } from "../utils/posCatalogLoad.js";
 import {
@@ -99,9 +111,12 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
   const [listLoading, setListLoading] = useState(true);
   const [deliveryPedidoId, setDeliveryPedidoId] = useState(null);
   const deliveryPedidoIdRef = useRef(null);
+  const cartRef = useRef([]);
+  const deliverySyncChainRef = useRef(Promise.resolve());
   const [deliveryCodigo, setDeliveryCodigo] = useState("");
   const [pedidoEstado, setPedidoEstado] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
+  const [deliveryBusyMessage, setDeliveryBusyMessage] = useState("");
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [deliveryOpcionesModal, setDeliveryOpcionesModal] = useState({ open: false, product: null });
   const [deliveryInlineOpcionesProduct, setDeliveryInlineOpcionesProduct] = useState(null);
@@ -144,6 +159,10 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
   useEffect(() => {
     deliveryPedidoIdRef.current = deliveryPedidoId;
   }, [deliveryPedidoId]);
+
+  useEffect(() => {
+    cartRef.current = cart;
+  }, [cart]);
 
   const loadDeliveryList = useCallback(async () => {
     setListLoading(true);
@@ -276,7 +295,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
     }
   };
 
-  const persistDelivery = async () => {
+  const persistDelivery = async ({ manageBusy = true } = {}) => {
     if (cart.length === 0) {
       snackbar.info("Agrega productos para el pedido delivery.");
       return null;
@@ -286,7 +305,10 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
       return null;
     }
     const body = buildDeliveryPedidoBody(customer, cart);
-    setActionBusy(true);
+    if (manageBusy) {
+      setDeliveryBusyMessage("Guardando pedido…");
+      setActionBusy(true);
+    }
     try {
       const currentId = deliveryPedidoIdRef.current;
       if (!currentId) {
@@ -312,7 +334,9 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
       snackbar.error(e?.message || "No se pudo guardar el pedido.");
       return null;
     } finally {
-      setActionBusy(false);
+      if (manageBusy) {
+        clearBusyUi(setActionBusy, setDeliveryBusyMessage);
+      }
     }
   };
 
@@ -380,14 +404,71 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
     addCartLine(product, [{ grupoId: Number(grupoId), opcionId: oid }]);
   };
 
+  const removeCartLine = (lineId) => {
+    if (isPedidoBloqueado || actionBusy || !cajaAbierta) return;
+    const prev = cartRef.current;
+    const next = prev.filter((x) => x.lineId !== lineId);
+    if (next.length === prev.length) return;
+
+    cartRef.current = next;
+    setCart(next);
+
+    const pedidoId = deliveryPedidoIdRef.current;
+    if (!pedidoId) return;
+
+    const lineaId = parsePosBackendLineId(lineId);
+    deliverySyncChainRef.current = deliverySyncChainRef.current
+      .then(async () => {
+        if (lineaId) {
+          const resp = await backofficeApi.deliveryEliminarLinea(pedidoId, lineaId);
+          if (isPosOrdenVacioResponse(resp)) {
+            if (next.length === 0) {
+              setCart([]);
+              cartRef.current = [];
+            } else {
+              snackbar.error("El pedido quedó vacío en el servidor; recargando.");
+              const fresh = await backofficeApi.getDeliveryPedido(pedidoId);
+              applyPedidoDetail(fresh);
+            }
+          } else {
+            const fresh = await backofficeApi.getDeliveryPedido(pedidoId);
+            const items = fresh?.items ?? fresh?.Items ?? [];
+            const mapped = mapBackendItemsToCart(items);
+            setCart(mapped);
+            cartRef.current = mapped;
+          }
+          await loadDeliveryList();
+          return;
+        }
+        if (next.length > 0) {
+          const savedCart = cartRef.current;
+          if (savedCart.length === 0) return;
+          const body = buildDeliveryPedidoBody(customer, savedCart);
+          await backofficeApi.updateDeliveryPedido(pedidoId, body);
+          await loadDeliveryList();
+        }
+      })
+      .catch((e) => {
+        snackbar.error(e?.message || "No se pudo quitar el producto.");
+      });
+
+    void deliverySyncChainRef.current;
+  };
+
   const updateQty = (lineId, delta) => {
     if (isPedidoBloqueado) return;
     if (!cajaAbierta) return;
-    setCart((prev) =>
-      prev
-        .map((x) => (x.lineId === lineId ? { ...x, qty: Math.max(0, Number(x.qty || 0) + delta) } : x))
-        .filter((x) => x.qty > 0)
-    );
+    const prev = cartRef.current;
+    const item = prev.find((x) => x.lineId === lineId);
+    if (!item) return;
+    const newQty = Math.max(0, Number(item.qty || 0) + delta);
+    if (newQty <= 0) {
+      removeCartLine(lineId);
+      return;
+    }
+    const next = prev.map((x) => (x.lineId === lineId ? { ...x, qty: newQty } : x));
+    cartRef.current = next;
+    setCart(next);
   };
 
   const editSavedDelivery = async (row) => {
@@ -400,32 +481,36 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
       snackbar.error("Caja cerrada. Abrí caja para editar pedidos delivery.");
       return;
     }
-    setActionBusy(true);
     try {
-      const detail = await backofficeApi.getDeliveryPedido(row.pedidoId);
-      applyPedidoDetail(detail);
-      setOpenBuilder(true);
-      setSearch("");
-      setCategory("");
-      setDeliveryInlineOpcionesProduct(null);
-      await ensureCatalogLoaded();
+      await runWithBusyUi(
+        { setBusy: setActionBusy, setMessage: setDeliveryBusyMessage, caption: "Cargando pedido…" },
+        async () => {
+          const detail = await backofficeApi.getDeliveryPedido(row.pedidoId);
+          applyPedidoDetail(detail);
+          setOpenBuilder(true);
+          setSearch("");
+          setCategory("");
+          setDeliveryInlineOpcionesProduct(null);
+          await ensureCatalogLoaded();
+        },
+      );
     } catch (e) {
       snackbar.error(e?.message || "No se pudo cargar el pedido.");
-    } finally {
-      setActionBusy(false);
     }
   };
 
   const viewSavedDelivery = async (row) => {
-    setActionBusy(true);
     try {
-      const detail = await backofficeApi.getDeliveryPedido(row.pedidoId);
-      setDetailOrder(detail);
-      setShowDetail(true);
+      await runWithBusyUi(
+        { setBusy: setActionBusy, setMessage: setDeliveryBusyMessage, caption: "Cargando detalle…" },
+        async () => {
+          const detail = await backofficeApi.getDeliveryPedido(row.pedidoId);
+          setDetailOrder(detail);
+          setShowDetail(true);
+        },
+      );
     } catch (e) {
       snackbar.error(e?.message || "No se pudo cargar el detalle del pedido.");
-    } finally {
-      setActionBusy(false);
     }
   };
 
@@ -441,18 +526,18 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
       snackbar.error("Caja cerrada. Abrí caja para editar pedidos delivery.");
       return;
     }
-    setActionBusy(true);
-    try {
-      applyPedidoDetail(detailOrder);
-      setShowDetail(false);
-      setOpenBuilder(true);
-      setSearch("");
-      setCategory("");
-      setDeliveryInlineOpcionesProduct(null);
-      await ensureCatalogLoaded();
-    } finally {
-      setActionBusy(false);
-    }
+    await runWithBusyUi(
+      { setBusy: setActionBusy, setMessage: setDeliveryBusyMessage, caption: "Abriendo editor…" },
+      async () => {
+        applyPedidoDetail(detailOrder);
+        setShowDetail(false);
+        setOpenBuilder(true);
+        setSearch("");
+        setCategory("");
+        setDeliveryInlineOpcionesProduct(null);
+        await ensureCatalogLoaded();
+      },
+    );
   };
 
   const openCancelDeliveryPin = (row) => {
@@ -471,38 +556,40 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
       snackbar.info("El pedido no tiene teléfono de cliente.");
       return;
     }
-    setActionBusy(true);
     try {
-      const data = await backofficeApi.deliveryPedidoWhatsappLink(row.pedidoId);
-      const waLink = data?.waLink ?? data?.WaLink ?? "";
-      if (!waLink || typeof waLink !== "string") {
-        throw new Error("No se pudo generar el enlace de WhatsApp.");
-      }
-      const win = window.open(waLink, "_blank", "noopener,noreferrer");
-      if (!win) {
-        snackbar.error("Permite ventanas emergentes para abrir WhatsApp.");
-        return;
-      }
-      snackbar.success("Abriendo WhatsApp.");
+      await runWithBusyUi(
+        { setBusy: setActionBusy, setMessage: setDeliveryBusyMessage, caption: "Preparando WhatsApp…" },
+        async () => {
+          const data = await backofficeApi.deliveryPedidoWhatsappLink(row.pedidoId);
+          const waLink = data?.waLink ?? data?.WaLink ?? "";
+          if (!waLink || typeof waLink !== "string") {
+            throw new Error("No se pudo generar el enlace de WhatsApp.");
+          }
+          const win = window.open(waLink, "_blank", "noopener,noreferrer");
+          if (!win) {
+            snackbar.error("Permite ventanas emergentes para abrir WhatsApp.");
+            return;
+          }
+          snackbar.success("Abriendo WhatsApp.");
+        },
+      );
     } catch (e) {
       snackbar.error(e?.message || "No se pudo generar enlace de WhatsApp.");
-    } finally {
-      setActionBusy(false);
     }
   };
 
   const executeDeliveryCancelConPin = async (codigo) => {
     const row = cancelDeliveryPin.row;
     if (!row?.pedidoId) throw new Error("Pedido no seleccionado.");
-    setActionBusy(true);
-    try {
-      await backofficeApi.deliveryPedidoCancelar(row.pedidoId, codigo);
-      snackbar.success("Pedido cancelado.");
-      setCancelDeliveryPin({ open: false, row: null });
-      await loadDeliveryList();
-    } finally {
-      setActionBusy(false);
-    }
+    await runWithBusyUi(
+      { setBusy: setActionBusy, setMessage: setDeliveryBusyMessage, caption: "Cancelando pedido…" },
+      async () => {
+        await backofficeApi.deliveryPedidoCancelar(row.pedidoId, codigo);
+        snackbar.success("Pedido cancelado.");
+        setCancelDeliveryPin({ open: false, row: null });
+        await loadDeliveryList();
+      },
+    );
   };
 
   const handleCancelar = () => {
@@ -520,42 +607,30 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
       snackbar.info("No hay productos para imprimir.");
       return;
     }
-    const pid = await persistDelivery();
-    if (!pid) return;
-    setActionBusy(true);
     try {
-      await printDeliveryPrecuenta(pid);
+      await runWithBusyUi(
+        { setBusy: setActionBusy, setMessage: setDeliveryBusyMessage, caption: "Imprimiendo cuenta…" },
+        async () => {
+          const pid = await persistDelivery({ manageBusy: false });
+          if (!pid) return;
+          await printDeliveryPrecuenta(pid);
+        },
+      );
     } catch (e) {
       snackbar.error(e?.message || "No se pudo imprimir la cuenta.");
-    } finally {
-      setActionBusy(false);
     }
   };
 
   const printDeliveryPrecuenta = async (pid) => {
     const pre = await backofficeApi.deliveryPedidoPrecuenta(pid);
-    const urlPrecuenta =
-      pre?.urlImpresionPrecuenta ??
-      pre?.UrlImpresionPrecuenta ??
-      pre?.urlImpresion ??
-      pre?.UrlImpresion ??
-      null;
-    const htmlPrecuenta = pre?.htmlPrecuenta ?? pre?.HtmlPrecuenta ?? null;
-
-    if (urlPrecuenta && (await openBackendPrintUrl(urlPrecuenta))) {
-      snackbar.info("Pre-cuenta lista para imprimir.");
+    if (await tryPrintPrecuentaFromPayload(pre)) {
+      snackbar.info(PRECUENTA_PRINT_READY_INFO);
       return true;
     }
-    if (htmlPrecuenta && (await openBackendPrintHtml(htmlPrecuenta))) {
-      snackbar.info("Pre-cuenta lista para imprimir.");
-      return true;
-    }
-
     try {
       const rawHtml = await backofficeApi.deliveryPedidoPrecuentaHtml(pid);
-      const htmlDirect = typeof rawHtml === "string" ? rawHtml : rawHtml?.html ?? rawHtml?.Html ?? null;
-      if (htmlDirect && (await openBackendPrintHtml(htmlDirect))) {
-        snackbar.info("Pre-cuenta lista para imprimir.");
+      if (await tryPrintHtmlBody(rawHtml)) {
+        snackbar.info(PRECUENTA_PRINT_READY_INFO);
         return true;
       }
     } catch {
@@ -572,19 +647,26 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
       return;
     }
     if (isPedidoBloqueado) return;
-    const pid = await persistDelivery();
-    if (!pid) return;
-    setActionBusy(true);
     try {
-      await backofficeApi.deliveryPedidoEnviarCocina(pid);
-      const fresh = await backofficeApi.getDeliveryPedido(pid);
-      setPedidoEstado(String(fresh?.estado ?? fresh?.Estado ?? ""));
-      await loadDeliveryList();
-      snackbar.success("Pedido enviado a cocina.");
+      await runWithBusyUi(
+        { setBusy: setActionBusy, setMessage: setDeliveryBusyMessage, caption: "Enviando a cocina…" },
+        async () => {
+          const pid = await persistDelivery({ manageBusy: false });
+          if (!pid) return;
+          const { data, message } = await backofficeApi.deliveryPedidoEnviarCocina(pid);
+          const infoMsg = typeof message === "string" ? message.trim() : "";
+          if (infoMsg) snackbar.info(infoMsg);
+          else snackbar.success("Pedido enviado a cocina.");
+
+          await printKitchenTicketAfterEnviarCocina(data, snackbar);
+
+          const fresh = await backofficeApi.getDeliveryPedido(pid);
+          setPedidoEstado(String(fresh?.estado ?? fresh?.Estado ?? ""));
+          await loadDeliveryList();
+        },
+      );
     } catch (e) {
       snackbar.error(e?.message || "No se pudo enviar a cocina.");
-    } finally {
-      setActionBusy(false);
     }
   };
 
@@ -598,21 +680,23 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
       return;
     }
     if (isPedidoBloqueado) return;
-    const pid = await persistDelivery();
-    if (!pid) return;
-    setActionBusy(true);
     try {
-      const detail = await backofficeApi.getDeliveryPedido(pid);
-      const rawItems = detail?.items ?? detail?.Items;
-      const lineCart =
-        Array.isArray(rawItems) && rawItems.length > 0 ? mapBackendItemsToCart(rawItems) : cart;
-      setSaleModalLines(posCartToModalLines(lineCart));
-      setSaleBackendTotal(getPedidoMontoNumeric(detail));
-      setSaleModalOpen(true);
+      await runWithBusyUi(
+        { setBusy: setActionBusy, setMessage: setDeliveryBusyMessage, caption: "Preparando cobro…" },
+        async () => {
+          const pid = await persistDelivery({ manageBusy: false });
+          if (!pid) return;
+          const detail = await backofficeApi.getDeliveryPedido(pid);
+          const rawItems = detail?.items ?? detail?.Items;
+          const lineCart =
+            Array.isArray(rawItems) && rawItems.length > 0 ? mapBackendItemsToCart(rawItems) : cart;
+          setSaleModalLines(posCartToModalLines(lineCart));
+          setSaleBackendTotal(getPedidoMontoNumeric(detail));
+          setSaleModalOpen(true);
+        },
+      );
     } catch (e) {
       snackbar.error(e?.message || "No se pudo abrir el cobro.");
-    } finally {
-      setActionBusy(false);
     }
   };
 
@@ -634,21 +718,8 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
         resp = await backofficeApi.deliveryPedidoProcesarPago(pid, payload);
       }
 
-      const url = resp?.urlImpresionRecibo ?? resp?.UrlImpresionRecibo ?? resp?.url ?? resp?.Url;
-      const html =
-        resp?.htmlImpresionRecibo ??
-        resp?.HtmlImpresionRecibo ??
-        resp?.htmlPrecuenta ??
-        resp?.HtmlPrecuenta ??
-        null;
-
-      // Evitamos abrir pestaña nueva: si hay HTML lo imprimimos con iframe oculto.
-      if (html && typeof html === "string") {
-        const ok = await openBackendPrintHtml(html);
-        if (!ok) snackbar.error("No se pudo imprimir el recibo.");
-      } else if (url) {
-        const ok = await openBackendPrintUrl(url);
-        if (!ok) snackbar.error("No se pudo imprimir el recibo.");
+      if (pagoResponseHasReciboPrintChannel(resp) && !(await tryPrintReciboFromPagoResponse(resp))) {
+        snackbar.error("No se pudo imprimir el recibo.");
       }
 
       snackbar.success("Venta procesada.");
@@ -675,16 +746,26 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
       snackbar.error("No se encontró el ID del pedido.");
       return;
     }
-    setActionBusy(true);
     try {
-      const printed = await printDeliveryPrecuenta(pid);
-      if (printed) return;
+      await runWithBusyUi(
+        { setBusy: setActionBusy, setMessage: setDeliveryBusyMessage, caption: "Imprimiendo cuenta…" },
+        async () => {
+          const printed = await printDeliveryPrecuenta(pid);
+          if (printed) return;
+        },
+      );
     } catch (e) {
       snackbar.error(e?.message || "No se pudo imprimir la cuenta.");
-    } finally {
-      setActionBusy(false);
     }
   };
+
+  const deliveryBusyOverlay = (
+    <PosActionLoadingOverlay
+      open={Boolean(actionBusy || saleProcessing)}
+      saleProcessing={saleProcessing}
+      detailMessage={deliveryBusyMessage}
+    />
+  );
 
   if (showDetail && detailOrder) {
     const createdAtLabel = formatDateTimeLabel(detailOrder.fechaCreacion ?? detailOrder.createdAt ?? detailOrder.CreatedAt);
@@ -701,7 +782,9 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
     const estadoDetalle = String(detailOrder.estado ?? detailOrder.Estado ?? "");
     const codigo = detailOrder.codigo ?? detailOrder.Codigo ?? `#${detailOrder.id ?? detailOrder.Id}`;
     return (
-      <div className="min-w-0 max-w-full space-y-4">
+      <>
+        {deliveryBusyOverlay}
+        <div className="min-w-0 max-w-full space-y-4">
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
@@ -862,12 +945,15 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
           </section>
         </div>
       </div>
+      </>
     );
   }
 
   if (!openBuilder) {
     return (
-      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <>
+        {deliveryBusyOverlay}
+        <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1000,11 +1086,14 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
           </table>
         </div>
       </section>
+      </>
     );
   }
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-100 p-3 shadow-sm lg:h-[calc(100vh-10.5rem)]">
+    <>
+      {deliveryBusyOverlay}
+      <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-100 p-3 shadow-sm lg:h-[calc(100vh-10.5rem)]">
       {!cajaAbierta && (
         <div
           className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900"
@@ -1146,7 +1235,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                           <span>{formatCurrency(Number(item.price || 0) * Number(item.qty || 0), currencySymbol)}</span>
                           <button
                             type="button"
-                            onClick={() => setCart((prev) => prev.filter((x) => x.lineId !== item.lineId))}
+                            onClick={() => removeCartLine(item.lineId)}
                             disabled={isPedidoBloqueado || actionBusy || !cajaAbierta}
                             className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-red-200 text-red-600 disabled:opacity-40"
                           >
@@ -1185,7 +1274,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                 <button
                   type="button"
                   onClick={() => void handleImprimirCuenta()}
-                  disabled={actionBusy || isPedidoBloqueado || !cajaAbierta}
+                  disabled={actionBusy || saleProcessing || isPedidoBloqueado || !cajaAbierta}
                   className="inline-flex items-center gap-1 rounded-sm bg-sky-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-sky-600 disabled:opacity-60"
                 >
                   <Printer className="h-3.5 w-3.5" />
@@ -1194,7 +1283,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                 <button
                   type="button"
                   onClick={() => void handleEnviarCocina()}
-                  disabled={actionBusy || isPedidoBloqueado || !cajaAbierta}
+                  disabled={actionBusy || saleProcessing || isPedidoBloqueado || !cajaAbierta}
                   className="inline-flex items-center gap-1 rounded-sm bg-amber-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-amber-600 disabled:opacity-60"
                 >
                   <ChefHat className="h-3.5 w-3.5" />
@@ -1203,7 +1292,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                 <button
                   type="button"
                   onClick={() => void handleProcesarOrden()}
-                  disabled={actionBusy || isPedidoBloqueado || !cajaAbierta}
+                  disabled={actionBusy || saleProcessing || isPedidoBloqueado || !cajaAbierta}
                   className="inline-flex items-center gap-1 rounded-sm bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
                 >
                   <Save className="h-3.5 w-3.5" />
@@ -1212,7 +1301,7 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
                 <button
                   type="button"
                   onClick={handleGuardar}
-                  disabled={actionBusy || isPedidoBloqueado || !cajaAbierta}
+                  disabled={actionBusy || saleProcessing || isPedidoBloqueado || !cajaAbierta}
                   className="inline-flex items-center gap-1 rounded-sm bg-violet-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
                 >
                   <Save className="h-3.5 w-3.5" />
@@ -1367,5 +1456,6 @@ export function DeliveryView({ currencySymbol = "C$", exchangeRate }) {
         />
       )}
     </section>
+    </>
   );
 }

@@ -1,4 +1,4 @@
-import { LayoutGrid, Map } from "lucide-react";
+import { LayoutGrid, Map, Maximize2 } from "lucide-react";
 
 export function TablesMesasStatsBar({
   total,
@@ -10,6 +10,7 @@ export function TablesMesasStatsBar({
   onNuevaMesa,
   layoutMode = "zonas",
   onLayoutModeChange,
+  onToggleMaximize,
 }) {
   return (
     <div className="mb-2 flex flex-col gap-2 sm:mb-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between lg:mb-4">
@@ -38,9 +39,8 @@ export function TablesMesasStatsBar({
             <button
               type="button"
               onClick={() => onLayoutModeChange("zonas")}
-              className={`inline-flex items-center gap-0.5 rounded-md px-2 py-1 text-[11px] font-semibold sm:gap-1 sm:px-2.5 sm:py-1.5 sm:text-xs ${
-                layoutMode === "zonas" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
-              }`}
+              className={`inline-flex items-center gap-0.5 rounded-md px-2 py-1 text-[11px] font-semibold sm:gap-1 sm:px-2.5 sm:py-1.5 sm:text-xs ${layoutMode === "zonas" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                }`}
               title="Vista por zonas"
             >
               <LayoutGrid className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -49,15 +49,25 @@ export function TablesMesasStatsBar({
             <button
               type="button"
               onClick={() => onLayoutModeChange("plano")}
-              className={`inline-flex items-center gap-0.5 rounded-md px-2 py-1 text-[11px] font-semibold sm:gap-1 sm:px-2.5 sm:py-1.5 sm:text-xs ${
-                layoutMode === "plano" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
-              }`}
+              className={`inline-flex items-center gap-0.5 rounded-md px-2 py-1 text-[11px] font-semibold sm:gap-1 sm:px-2.5 sm:py-1.5 sm:text-xs ${layoutMode === "plano" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                }`}
               title="Vista plano (arrastrar mesas)"
             >
               <Map className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
               Plano
             </button>
           </div>
+        )}
+        {layoutMode === "plano" && typeof onToggleMaximize === "function" && (
+          <button
+            type="button"
+            onClick={onToggleMaximize}
+            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 sm:px-3 sm:py-2 sm:text-xs inline-flex items-center gap-1 shadow-sm"
+            title="Pantalla completa del plano"
+          >
+            <Maximize2 className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-slate-500" />
+            Ampliar
+          </button>
         )}
         <button
           type="button"

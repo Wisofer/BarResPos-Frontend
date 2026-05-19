@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { DEFAULT_TIPO_CAMBIO_USD, formatCurrency } from "../utils/currency.js";
 
 /**
@@ -223,8 +224,9 @@ export function PosProcesarVentaModal({
           <button
             type="submit"
             disabled={busy || (tipoPago === "Efectivo" && recibidoCordobas + 1e-6 < totalAPagarCordobas)}
-            className="flex-1 rounded-xl bg-amber-500 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-amber-500 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
           >
+            {busy ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden /> : null}
             {busy ? "Cobrando…" : "Cobrar"}
           </button>
         </div>

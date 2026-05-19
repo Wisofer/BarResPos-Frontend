@@ -163,6 +163,19 @@ export function posCartToModalLines(cart) {
   });
 }
 
+/** `b-123` → 123; líneas locales (UUID) → null. */
+export function parsePosBackendLineId(lineId) {
+  if (lineId == null || lineId === "") return null;
+  const m = /^b-(\d+)$/.exec(String(lineId));
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+export function isPosOrdenVacioResponse(resp) {
+  return Boolean(resp?.vacio ?? resp?.Vacio);
+}
+
 export function getPedidoMontoNumeric(pedido) {
   const m = pedido?.monto ?? pedido?.Monto ?? pedido?.total ?? pedido?.Total;
   if (m != null && Number.isFinite(Number(m))) return Number(m);

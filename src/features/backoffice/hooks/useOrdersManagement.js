@@ -5,6 +5,7 @@ import { useSnackbar } from "../../../contexts/SnackbarContext.jsx";
 import { useAuth } from "../../../contexts/AuthContext.jsx";
 import { isAdminUser } from "../utils/auth.js";
 import { printOrderTicket } from "../utils/orderTicketPrint.js";
+import { isPedidoEstadoBloqueadoParaEdicion } from "../utils/ordersViewFormatters.js";
 import { mapListadoPedidoToRow, mapResumenToCards } from "../utils/ordersViewMappers.js";
 
 function isEmptyDraftOrder(order) {
@@ -108,6 +109,13 @@ export function useOrdersManagement(currencySymbol) {
     setDataNonce((n) => n + 1);
   }, []);
 
+  useEffect(() => {
+    if (!detailOrder || !showEdit) return;
+    if (isPedidoEstadoBloqueadoParaEdicion(detailOrder.estado)) {
+      setShowEdit(false);
+    }
+  }, [detailOrder, showEdit]);
+
   const filteredOrders = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     if (!q) return orders;
@@ -180,6 +188,10 @@ export function useOrdersManagement(currencySymbol) {
   };
 
   const openEdit = (detail) => {
+    if (isPedidoEstadoBloqueadoParaEdicion(detail?.estado)) {
+      snackbar.info("Los pedidos pagados o cancelados no se pueden editar.");
+      return;
+    }
     setEditForm({
       mesaId: detail?.mesaId ?? "",
       clienteId: detail?.clienteId ?? "",
@@ -270,8 +282,9 @@ export function useOrdersManagement(currencySymbol) {
     try {
       await backofficeApi.pedidoCancelar(order.rowId, codigo);
       snackbar.success("Pedido cancelado.");
+      setConfirmCancel({ open: false, order: null });
       refreshList();
-      if (showDetail && detailOrder?.id === order.rowId) {
+      if (showDetail && detailOrder && (detailOrder.id == order.rowId || Number(detailOrder.id) === Number(order.rowId))) {
         try {
           const r = await backofficeApi.getPedido(order.rowId);
           setDetailOrder(r);
@@ -279,6 +292,8 @@ export function useOrdersManagement(currencySymbol) {
           setShowDetail(false);
         }
       }
+    } catch (err) {
+      throw err;
     } finally {
       setBusyAction(false);
     }

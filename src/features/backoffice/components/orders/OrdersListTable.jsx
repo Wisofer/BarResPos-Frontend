@@ -1,5 +1,5 @@
 import { Eye, Pencil, XCircle } from "lucide-react";
-import { orderStatusPillClass, formatDateTimeParts, labelDestinoPedido, labelTipoPedido } from "../../utils/ordersViewFormatters.js";
+import { orderStatusPillClass, formatDateTimeParts, labelDestinoPedido, labelTipoPedido, isPedidoEstadoBloqueadoParaEdicion } from "../../utils/ordersViewFormatters.js";
 
 const th = "px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-slate-500";
 const tipoPillClass = (tipo, origenPedido) => {
@@ -91,8 +91,12 @@ export function OrdersListTable({
                       <button
                         type="button"
                         onClick={() => onEdit(order)}
-                        disabled={busyAction || isEmptyDraft || order.status === "Pagado" || order.status === "Cancelado"}
-                        title="Editar"
+                        disabled={busyAction || isEmptyDraft || isPedidoEstadoBloqueadoParaEdicion(order.status)}
+                        title={
+                          isPedidoEstadoBloqueadoParaEdicion(order.status)
+                            ? "Pedido pagado o cancelado: no se puede editar"
+                            : "Editar"
+                        }
                         className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40"
                       >
                         <Pencil className="h-4 w-4" />
@@ -102,7 +106,7 @@ export function OrdersListTable({
                       <button
                         type="button"
                         onClick={() => onCancel(order)}
-                        disabled={busyAction || isEmptyDraft || order.status === "Cancelado" || order.status === "Pagado"}
+                        disabled={busyAction || isEmptyDraft || isPedidoEstadoBloqueadoParaEdicion(order.status)}
                         title="Cancelar"
                         className="inline-flex h-8 w-8 items-center justify-center rounded-md text-rose-500 transition hover:bg-rose-50 hover:text-rose-700 disabled:opacity-40"
                       >
